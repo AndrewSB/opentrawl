@@ -68,6 +68,19 @@ func TestFallbackProviderUsesSecondaryAfterPrimaryError(t *testing.T) {
 	}
 }
 
+func TestValidLocationRejectsPhotosSentinels(t *testing.T) {
+	t.Parallel()
+	if validLocation(-180, -180) {
+		t.Fatal("-180,-180 should not be treated as a real location")
+	}
+	if validLocation(0, 0) {
+		t.Fatal("0,0 should not be treated as a real location")
+	}
+	if !validLocation(12.34, 56.78) {
+		t.Fatal("ordinary coordinates should be valid")
+	}
+}
+
 func createSyntheticPhotosDB(db *sql.DB) error {
 	statements := []string{
 		`create table ZASSET (

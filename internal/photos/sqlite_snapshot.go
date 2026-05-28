@@ -137,7 +137,7 @@ order by a.ZDATECREATED, a.ZUUID
 				"additional_attributes_join": "ZADDITIONALASSETATTRIBUTES",
 			},
 		}
-		if row.latitude.Valid && row.longitude.Valid && (row.latitude.Float64 != 0 || row.longitude.Float64 != 0) {
+		if row.latitude.Valid && row.longitude.Valid && validLocation(row.latitude.Float64, row.longitude.Float64) {
 			var accuracy *float64
 			if row.horizontalAccuracy.Valid {
 				accuracy = &row.horizontalAccuracy.Float64
@@ -290,6 +290,13 @@ func sqliteAvailability(local, remote bool) string {
 	default:
 		return "unknown"
 	}
+}
+
+func validLocation(latitude, longitude float64) bool {
+	if latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180 {
+		return false
+	}
+	return latitude != 0 || longitude != 0
 }
 
 func coreDataTime(value sql.NullFloat64) string {
