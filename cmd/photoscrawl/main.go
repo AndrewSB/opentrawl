@@ -187,7 +187,7 @@ func run(ctx context.Context, args []string) error {
 		}
 		return output.Write(os.Stdout, format, "evidence", result)
 	case "neighbors":
-		return output.UsageError{Err: fmt.Errorf("%s is planned but not implemented in this POC slice", args[0])}
+		return output.UsageError{Err: fmt.Errorf("%s needs a tested source-level definition before implementation", args[0])}
 	default:
 		return usage()
 	}

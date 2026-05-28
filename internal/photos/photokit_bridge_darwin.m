@@ -105,6 +105,8 @@ static void pcSetError(char **errorOut, NSString *message) {
 static PHAuthorizationStatus pcEnsureAuthorized(void) {
   __block PHAuthorizationStatus status;
   if (@available(macOS 11.0, *)) {
+    // macOS Photos exposes asset fetch access through ReadWrite; AddOnly cannot
+    // enumerate the library. This bridge still only calls fetch/read APIs.
     status = [PHPhotoLibrary authorizationStatusForAccessLevel:PHAccessLevelReadWrite];
     if (status == PHAuthorizationStatusNotDetermined) {
       dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
