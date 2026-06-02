@@ -31,8 +31,15 @@ go run ./cmd/photoscrawl search --query "drone beach portugal" --json
 go run ./cmd/photoscrawl open --id asset:<id> --json
 go run ./cmd/photoscrawl neighbors --id asset:<id> --json
 go run ./cmd/photoscrawl evidence --row-id asset:<id> --json
+go run ./cmd/photoscrawl place-context --input <private-eval-run>/metadata/E001.json --json
+go run ./cmd/photoscrawl place-card --input <crawlkit-cache-dir>/place-context/<key>.json
+go run ./cmd/photoscrawl place-backfill --json
 go run ./cmd/photoscrawl eval-card --library "$HOME/Pictures/Photos Library.photoslibrary" --allow-icloud-downloads --limit 1 --models gemma4:31b-cloud --ollama-url https://ollama.com/api --json
 ```
+
+Default runtime paths come from crawlkit platform dirs. The primary database is
+`photos.sqlite` under the crawlkit data dir; provider caches and exported
+originals use the crawlkit cache dir.
 
 Planned crawl-family commands:
 
@@ -64,13 +71,33 @@ people, places, or clusters. Current reasons are deterministic archive facts:
 same burst id, same album id, same resource hash, nearby creation time, nearby
 raw GPS, and shared local observation labels.
 
+`place-context` enriches one asset's own latitude/longitude/accuracy/time into
+address hierarchy and candidate nearby POIs. Apple's network-backed
+CoreLocation reverse geocoder is the required step. MapKit POI search is
+optional venue evidence: no POI found is recorded as `poi_status: "none"`,
+while real provider errors still fail. Text output is a compact deterministic
+place card; `--json` returns provider evidence. Apple address areas of interest
+are rendered as map context, not as POIs.
+
+`place-card` renders cached provider evidence into the same deterministic
+Markdown card without re-calling providers. It keeps address detail, normalizes
+map context, caps useful POIs, and omits raw coordinates, warnings, provider
+counts, provenance, and invented confidence. It is for eval harnesses and
+private provider experiments.
+
+`place-backfill` is a private evidence command for full-library Apple provider
+probes. It reads `photos.sqlite`, dedupes exact location/accuracy keys, retries
+provider failures, and writes the manifest, attempts, raw successful provider
+outputs, and final errors under the crawlkit data dir's
+`backfills/place-context-full/apple-ingest` subtree.
+
 `eval-card` is an opt-in research harness for prompt/model evaluation. It uses
 the tracked prompt files in `prompts/`, prepares canonical full-resolution JPEGs
 from originals, passes full metadata as a sidecar prompt input, and writes all
-private images, metadata, and model responses under `~/.photoscrawl/evals`. If
-`--allow-icloud-downloads` is set, PhotoKit may download missing originals into
-`~/.photoscrawl/cache/originals`; normal crawl/classify commands do not force
-iCloud downloads.
+private images, metadata, and model responses under the crawlkit data dir's
+`evals` subtree. If `--allow-icloud-downloads` is set, PhotoKit may download
+missing originals into the crawlkit cache dir's `originals` subtree; normal
+crawl/classify commands do not force iCloud downloads.
 
 ## Current Useful Output
 

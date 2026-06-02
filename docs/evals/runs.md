@@ -20,4 +20,5 @@ Not allowed:
 - exact GPS;
 - OCR/barcode/ticket/passport/receipt text;
 - copied model responses from real user images;
-- private output paths beyond the generic `~/.photoscrawl/evals/<run-id>` shape.
+- private output paths beyond the generic
+  `<crawlkit-data-dir>/evals/<run-id>` shape.
