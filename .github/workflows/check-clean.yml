@@ -1,0 +1,10 @@
+name: check-clean
+on:
+  push:
+  pull_request:
+jobs:
+  check-clean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/check-clean

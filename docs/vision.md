@@ -1,0 +1,118 @@
+---
+written_by: ai
+---
+
+# Vision
+
+The project is called OpenTrawl: a trawl net drags the deep and brings
+everything up, and the open prefix names the open-source, plugin-first
+ambition (and the OpenClaw lineage). GitHub org `opentrawl`, one
+monorepo, one CLI (`trawl`), one Mac app shipped as Trawl.
+
+## North star
+
+An entire history of you, agent searchable. An agent onboards into a
+person's life with minimal steering: it can work out who the people in
+your life are, how you talk to them and where, what you did, and what is
+going on right now, by querying local archives of the services you
+actually use.
+
+The long-horizon test: an agent should be able to infer who someone's
+girlfriend is and how they message her across Telegram, WhatsApp and
+Gmail, what events they share in Calendar, what notes they share, and
+how many group chats they have in Signal, without being told.
+
+## What the suite is
+
+A local-first crawler suite for macOS: one app and one CLI that let you
+authorise your services and crawl them into local, per-source SQLite
+archives that agents can query through a single entry point.
+
+The layers, bottom to top:
+
+1. Source apps: Messages, Telegram, WhatsApp, Gmail, Calendar, Notes,
+   Signal, and later Photos, X and others.
+2. Source crawlers: one Go binary per source. Each owns extraction, its
+   own archive database, auth and session handling, search, status and
+   privacy policy. Each conforms to the shared control contract.
+3. Control contract: a crawlkit-defined JSON contract every crawler
+   speaks: `metadata`, `status`, `sync`, `search`, `open`, `doctor` and
+   `contacts export`, all with `--json`, all bounded, all human readable.
+4. Federation surface: one CLI (`trawl`) that discovers installed
+   crawlers through the contract and gives agents and humans a single
+   surface: status across everything, sync anything, search across
+   sources. One Mac app that shows the key per-crawler metrics and
+   handles authorisation. No knobs.
+5. Derived layers (later): daily deltas, cross-source identity joins,
+   life orientation. These build on the substrate; they never reach
+   around it into source databases.
+
+## Design principles
+
+- Agent first, human readable. Every output must make sense to a human
+  reading it cold; if a human can read it properly, an agent can too. No
+  machine row IDs, no raw epoch timestamps, no unbounded dumps.
+- Local first. Archives live on your machine. Nothing leaves it unless
+  you explicitly publish. Cloud and remote replicas are optional add-ons,
+  never dependencies.
+- Federated, not unified. Each source keeps its own source-native
+  database. The single entry point is a query surface, not a shared
+  schema. Cross-source joins happen in derived layers, later, on top of
+  proven per-source archives.
+- Contract first. The plugin story is the control contract. Anyone who
+  wants to add their own messaging app implements the contract in any
+  language and their crawler appears in the CLI and the app.
+- No knobs. Defaults over configuration. A settings surface is a design
+  failure until proven otherwise.
+- Secrets never in output. Auth state is reported as booleans and expiry
+  dates. No command prints tokens, cookies or key material.
+- Bounded output everywhere. Every command paginates or truncates with an
+  explicit indicator. Token budgets are a design axis, not an
+  afterthought.
+- Boring Go for crawlers and the CLI. Swift and SwiftUI for the Mac app.
+  Code must be self-documenting: no magic constants, one obvious job per
+  function. Prose follows plain-language style.
+- Read only in v1. Write capability (sending messages) comes later
+  through the existing upstream access CLIs, behind explicit
+  authorisation.
+
+## Now, next, later
+
+- v1: iMessage, Telegram, WhatsApp, Gmail, Calendar and Contacts at the
+  golden-path bar, behind the federation CLI, with the new Mac app.
+- v1.5: Apple Notes, once the version-chain extractor matures.
+- v2: Signal (research spike first), Photos, X, daily deltas ("what
+  changed in the last 24 hours"), write capability, and a published
+  plugin API with agent surfaces (MCP or an Executor source) as thin
+  adapters over the contract.
+- Horizon: cross-source inference: identity resolution, relationship
+  inference, life orientation reports. The suite's job is to make this
+  possible by shipping clean archives and contact exports; the
+  inference layer stays out of the crawlers.
+
+## Prior art and how we relate to it
+
+- crawlkit (openclaw): the substrate. Shared SQLite, snapshot, backup,
+  sync-state, vector and control mechanics. We build on it and push
+  contract work back upstream; we do not fork it.
+- crawlbar (openclaw): proved the control-plane idea and wrote down the
+  control protocol and a quality rubric worth keeping. Its
+  settings-driven implementation is what the new Mac app replaces.
+- imsg, wacli, gogcli, remindctl (openclaw): per-service access CLIs with
+  read and write verbs. Too specific to be the entry point, exactly right
+  as adapters under crawlers and as the later write path.
+- Executor (executor.sh, MIT): an MCP gateway that normalises every tool
+  to name plus input and output schemas, with host-side credential
+  resolution and aggressive token economy. Validates our contract-first
+  design and our secrets rule. Difference: Executor is a gateway service;
+  we are local-first CLIs, so it is a v2 integration target, not a
+  dependency.
+
+## Non-goals for v1
+
+- no writes to any source
+- no cloud sync or hosted service
+- no cross-source joins or identity resolution inside crawlers
+- no MCP server or gateway (the contract must make these trivial later)
+- no prompt-tuned "intelligence" layered on thin archives; get the data
+  out first

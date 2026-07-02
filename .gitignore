@@ -1,0 +1,7 @@
+.DS_Store
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+dist/
