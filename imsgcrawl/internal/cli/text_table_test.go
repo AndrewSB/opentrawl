@@ -35,6 +35,7 @@ func TestSearchColumnsWrapContextWithoutEllipsis(t *testing.T) {
 	err := renderTextTable(&out, searchTextColumns(88), [][]string{{
 		"2026-06-07 09:10",
 		"georgepcloud@icloud.com",
+		"q7cux3",
 		"group with georgepcloud@icloud.com, michaelpalmer123@icloud.com",
 		"And banana",
 	}})
