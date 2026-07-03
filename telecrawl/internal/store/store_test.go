@@ -208,6 +208,143 @@ func TestSearchWhoFiltersGroupParticipants(t *testing.T) {
 	}
 }
 
+func TestResolveWhoExcludesGroupChatTitles(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	st := openTestStore(t, filepath.Join(t.TempDir(), "telecrawl.db"))
+	if err := st.ReplaceAll(ctx, ImportStats{SourcePath: "postbox", StartedAt: now, FinishedAt: now},
+		[]Contact{
+			{JID: "600", PeerType: "user", FullName: "Jeff Person"},
+			{JID: "-1001", PeerType: "group", FullName: "Jefs bachelor drive"},
+			{JID: "-1002", PeerType: "group", FullName: "Presents for Tini and Sjefke"},
+		},
+		[]Chat{
+			{JID: "-1001", Kind: "group", Name: "Jefs bachelor drive", LastMessageAt: now, MessageCount: 1},
+			{JID: "-1002", Kind: "group", Name: "Presents for Tini and Sjefke", LastMessageAt: now.Add(time.Minute), MessageCount: 1},
+		},
+		nil,
+		nil,
+		nil,
+		[]GroupParticipant{
+			{GroupJID: "-1001", UserJID: "600", ContactName: "Jeff Person", FirstName: "Jeff", IsActive: true},
+			{GroupJID: "-1002", UserJID: "700", ContactName: "Other Person", FirstName: "Other", IsActive: true},
+		},
+		[]Message{
+			{SourcePK: 1, ChatJID: "-1001", ChatName: "Jefs bachelor drive", MessageID: "1", SenderJID: "600", SenderName: "Jeff Person", Timestamp: now, Text: "group needle"},
+			{SourcePK: 2, ChatJID: "-1002", ChatName: "Presents for Tini and Sjefke", MessageID: "2", SenderJID: "700", SenderName: "Other Person", Timestamp: now.Add(time.Minute), Text: "other group needle"},
+		}); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates, err := st.ResolveWho(ctx, "jeff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || candidates[0].Who != "Jeff Person" {
+		t.Fatalf("candidates = %#v, want only Jeff Person", candidates)
+	}
+	for _, candidate := range candidates {
+		for _, disallowed := range []string{"Jefs bachelor drive", "Presents for Tini and Sjefke"} {
+			if candidate.Who == disallowed || containsStoreString(candidate.Identifiers, "-1001") || containsStoreString(candidate.Identifiers, "-1002") {
+				t.Fatalf("group chat leaked as who candidate: %#v", candidate)
+			}
+		}
+	}
+}
+
+func TestResolveWhoOnlyMatchesUnnamedParticipantByIdentifier(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	st := openTestStore(t, filepath.Join(t.TempDir(), "telecrawl.db"))
+	if err := st.ReplaceAll(ctx, ImportStats{SourcePath: "postbox", StartedAt: now, FinishedAt: now},
+		[]Contact{{JID: "200", PeerType: "user", FullName: "Jef Example"}},
+		[]Chat{{JID: "-1009", Kind: "group", Name: "resolver room", LastMessageAt: now.Add(time.Minute), MessageCount: 2}},
+		nil,
+		nil,
+		nil,
+		[]GroupParticipant{
+			{GroupJID: "-1009", UserJID: "200", ContactName: "Jef Example", FirstName: "Jef", IsActive: true},
+			{GroupJID: "-1009", UserJID: "165355235", IsActive: true},
+		},
+		[]Message{
+			{SourcePK: 1, ChatJID: "-1009", ChatName: "resolver room", MessageID: "1", SenderJID: "200", SenderName: "Jef Example", Timestamp: now, Text: "jef needle"},
+			{SourcePK: 2, ChatJID: "-1009", ChatName: "resolver room", MessageID: "2", SenderJID: "165355235", SenderName: "165355235", Timestamp: now.Add(time.Minute), Text: "numeric needle"},
+		}); err != nil {
+		t.Fatal(err)
+	}
+
+	nameMatches, err := st.ResolveWho(ctx, "jef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nameMatches) != 1 || nameMatches[0].Who != "Jef Example" {
+		t.Fatalf("name matches = %#v, want only Jef Example", nameMatches)
+	}
+
+	partialIDMatches, err := st.ResolveWho(ctx, "165")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(partialIDMatches) != 0 {
+		t.Fatalf("partial id matches = %#v, want no unnamed participant", partialIDMatches)
+	}
+
+	idMatches, err := st.ResolveWho(ctx, "165355235")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(idMatches) != 1 || idMatches[0].Who != "165355235" || !containsStoreString(idMatches[0].Identifiers, "165355235") {
+		t.Fatalf("identifier matches = %#v, want unnamed numeric participant", idMatches)
+	}
+}
+
+func TestResolveWhoDedupesAndMatchesGenerously(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	st := openTestStore(t, filepath.Join(t.TempDir(), "telecrawl.db"))
+	if err := st.ReplaceAll(ctx, ImportStats{SourcePath: "postbox", StartedAt: now, FinishedAt: now},
+		[]Contact{{JID: "200", Phone: "+1555200200", FullName: "Alice Example", Username: "alice_example"}},
+		[]Chat{{JID: "100", Kind: "chat", Name: "example chat", LastMessageAt: now.Add(time.Minute), MessageCount: 2}},
+		nil,
+		nil,
+		nil,
+		nil,
+		[]Message{
+			{SourcePK: 1, ChatJID: "100", ChatName: "example chat", MessageID: "1", SenderJID: "200", SenderName: "Alice Example", Timestamp: now, Text: "hello from alice"},
+			{SourcePK: 2, ChatJID: "100", ChatName: "example chat", MessageID: "2", SenderJID: "200", SenderName: "Alice Example", Timestamp: now.Add(time.Minute), Text: "second from alice"},
+		}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, query := range []string{"ali", "lice", "Alic Exampel", "@alice_example", "+1555200200"} {
+		t.Run(query, func(t *testing.T) {
+			candidates, err := st.ResolveWho(ctx, query)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(candidates) != 1 {
+				t.Fatalf("candidates = %#v, want one Alice candidate", candidates)
+			}
+			candidate := candidates[0]
+			if candidate.Who != "Alice Example" || candidate.Messages != 2 || !candidate.LastSeen.Equal(now.Add(time.Minute)) {
+				t.Fatalf("candidate = %#v, want deduped Alice stats", candidate)
+			}
+			if !containsStoreString(candidate.Identifiers, "+1555200200") || !containsStoreString(candidate.Identifiers, "@alice_example") || !containsStoreString(candidate.Identifiers, "200") {
+				t.Fatalf("identifiers = %#v, want phone, handle, and jid", candidate.Identifiers)
+			}
+		})
+	}
+}
+
+func containsStoreString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestOpenMigratesSchema2MessageMetadataColumns(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
