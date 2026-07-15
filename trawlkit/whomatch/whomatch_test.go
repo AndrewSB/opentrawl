@@ -140,16 +140,16 @@ func TestMergeSameNameUnionsIdentifiersAndPreservesOrdering(t *testing.T) {
 	newSeen := oldSeen.Add(time.Hour)
 	candidates := []Candidate{
 		{
-			Who:         "Michael Palmer",
-			Identifiers: []string{"michael.icloud@example.com", "michael.gmail@example.com"},
-			Aliases:     []string{"Mike"},
+			Who:         "Morgan Example",
+			Identifiers: []string{"morgan.two@example.com", "morgan.one@example.com"},
+			Aliases:     []string{"Morgan E."},
 			LastSeen:    oldSeen,
 			Messages:    1,
 		},
 		{
-			Who:         "  michael   palmer ",
-			Identifiers: []string{"michael.work@example.com", "michael.gmail@example.com"},
-			Aliases:     []string{"Michael P."},
+			Who:         "  morgan   example ",
+			Identifiers: []string{"morgan.work@example.com", "morgan.one@example.com"},
+			Aliases:     []string{"M. Example"},
 			LastSeen:    newSeen,
 			Messages:    2,
 		},
@@ -165,23 +165,23 @@ func TestMergeSameNameUnionsIdentifiersAndPreservesOrdering(t *testing.T) {
 	if len(merged) != 2 {
 		t.Fatalf("MergeSameName() returned %d candidates: %#v", len(merged), merged)
 	}
-	michael := merged[0]
-	if michael.Who != "Michael Palmer" {
-		t.Fatalf("Who = %q, want Michael Palmer", michael.Who)
+	morgan := merged[0]
+	if morgan.Who != "Morgan Example" {
+		t.Fatalf("Who = %q, want Morgan Example", morgan.Who)
 	}
-	wantIdentifiers := []string{"michael.icloud@example.com", "michael.gmail@example.com", "michael.work@example.com"}
-	if !reflect.DeepEqual(michael.Identifiers, wantIdentifiers) {
-		t.Fatalf("Identifiers = %#v, want %#v", michael.Identifiers, wantIdentifiers)
+	wantIdentifiers := []string{"morgan.two@example.com", "morgan.one@example.com", "morgan.work@example.com"}
+	if !reflect.DeepEqual(morgan.Identifiers, wantIdentifiers) {
+		t.Fatalf("Identifiers = %#v, want %#v", morgan.Identifiers, wantIdentifiers)
 	}
-	wantAliases := []string{"Mike", "Michael P."}
-	if !reflect.DeepEqual(michael.Aliases, wantAliases) {
-		t.Fatalf("Aliases = %#v, want %#v", michael.Aliases, wantAliases)
+	wantAliases := []string{"Morgan E.", "M. Example"}
+	if !reflect.DeepEqual(morgan.Aliases, wantAliases) {
+		t.Fatalf("Aliases = %#v, want %#v", morgan.Aliases, wantAliases)
 	}
-	if !michael.LastSeen.Equal(newSeen) {
-		t.Fatalf("LastSeen = %s, want %s", michael.LastSeen, newSeen)
+	if !morgan.LastSeen.Equal(newSeen) {
+		t.Fatalf("LastSeen = %s, want %s", morgan.LastSeen, newSeen)
 	}
-	if michael.Messages != 3 {
-		t.Fatalf("Messages = %d, want 3", michael.Messages)
+	if morgan.Messages != 3 {
+		t.Fatalf("Messages = %d, want 3", morgan.Messages)
 	}
 	if merged[1].Who != "Alice Example" {
 		t.Fatalf("second candidate = %#v, want Alice Example", merged[1])

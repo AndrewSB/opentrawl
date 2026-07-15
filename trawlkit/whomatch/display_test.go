@@ -11,57 +11,57 @@ func TestBestDisplayNameStructuralRules(t *testing.T) {
 	}{
 		{
 			name:  "frequency wins over case quality",
-			names: map[string]int{"JOSH PALMER": 3, "Josh Palmer": 1},
-			want:  "JOSH PALMER",
+			names: map[string]int{"AVERY EXAMPLE": 3, "Avery Example": 1},
+			want:  "AVERY EXAMPLE",
 		},
 		{
 			name:        "frequency wins even for an identifier-like spelling",
-			names:       map[string]int{"ebbak@spotify.com": 5, "Ebba Krusenstierna": 1},
-			identifiers: []string{"ebbak@spotify.com"},
-			want:        "ebbak@spotify.com",
+			names:       map[string]int{"avery@example.com": 5, "Avery Example": 1},
+			identifiers: []string{"avery@example.com"},
+			want:        "avery@example.com",
 		},
 		{
 			name:        "tied counts never pick the email-cruft spelling",
-			names:       map[string]int{"Ebba Krusenstierna": 1, "Ebba Krusenstierna <ebbak@spotify.com>": 1},
-			identifiers: []string{"ebbak@spotify.com"},
-			want:        "Ebba Krusenstierna",
+			names:       map[string]int{"Avery Example": 1, "Avery Example <avery@example.com>": 1},
+			identifiers: []string{"avery@example.com"},
+			want:        "Avery Example",
 		},
 		{
 			name:        "cruft spelling pools its count with the clean spelling",
-			names:       map[string]int{"Ebba Krusenstierna <ebbak@spotify.com>": 2, "EBBA KRUSENSTIERNA": 3},
-			identifiers: []string{"ebbak@spotify.com"},
-			want:        "EBBA KRUSENSTIERNA",
+			names:       map[string]int{"Avery Example <avery@example.com>": 2, "AVERY EXAMPLE": 3},
+			identifiers: []string{"avery@example.com"},
+			want:        "AVERY EXAMPLE",
 		},
 		{
 			name:        "name unlike identifier beats identifier spelling on tie",
-			names:       map[string]int{"joshpalmer123": 1, "Josh Palmer": 1},
-			identifiers: []string{"joshpalmer123"},
-			want:        "Josh Palmer",
+			names:       map[string]int{"averyexample123": 1, "Avery Example": 1},
+			identifiers: []string{"averyexample123"},
+			want:        "Avery Example",
 		},
 		{
 			name:  "no-letter spelling counts as identifier-like",
-			names: map[string]int{"+31 6 12345678": 1, "Katja": 1},
-			want:  "Katja",
+			names: map[string]int{"+1 555 0100": 1, "Casey Example": 1},
+			want:  "Casey Example",
 		},
 		{
 			name:  "mixed case beats lowercase beats caps",
-			names: map[string]int{"EBBA": 1, "ebba": 1, "Ebba": 1},
-			want:  "Ebba",
+			names: map[string]int{"AVERY": 1, "avery": 1, "Avery": 1},
+			want:  "Avery",
 		},
 		{
 			name:  "lowercase beats caps",
-			names: map[string]int{"EBBA": 1, "ebba": 1},
-			want:  "ebba",
+			names: map[string]int{"AVERY": 1, "avery": 1},
+			want:  "avery",
 		},
 		{
 			name:  "case preference beats shorter all-lower spelling",
-			names: map[string]int{"katja": 1, "Katja B": 1},
-			want:  "Katja B",
+			names: map[string]int{"casey": 1, "Casey B": 1},
+			want:  "Casey B",
 		},
 		{
 			name:  "shortest clean spelling wins",
-			names: map[string]int{"Josh Palmer (Work)": 1, "Josh Palmer": 1},
-			want:  "Josh Palmer",
+			names: map[string]int{"Avery Example (Work)": 1, "Avery Example": 1},
+			want:  "Avery Example",
 		},
 		{
 			name:  "alphabetical is the final tie-break",
@@ -70,7 +70,7 @@ func TestBestDisplayNameStructuralRules(t *testing.T) {
 		},
 		{
 			name:  "pure cruft strips to nothing",
-			names: map[string]int{"<ebbak@spotify.com>": 1},
+			names: map[string]int{"<avery@example.com>": 1},
 			want:  "",
 		},
 		{
@@ -85,8 +85,8 @@ func TestBestDisplayNameStructuralRules(t *testing.T) {
 		},
 		{
 			name:  "stripping cleans leftover whitespace",
-			names: map[string]int{"  Ebba   Krusenstierna   <ebbak@spotify.com>  ": 1},
-			want:  "Ebba Krusenstierna",
+			names: map[string]int{"  Avery   Example   <avery@example.com>  ": 1},
+			want:  "Avery Example",
 		},
 	}
 	for _, tc := range tests {
