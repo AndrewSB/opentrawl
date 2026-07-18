@@ -10,6 +10,7 @@ identity="OpenTrawl Dev Signing"
 keychain="opentrawl-dev.keychain"
 pass_file="${XDG_CONFIG_HOME:-$HOME/.config}/opentrawl/dev-keychain-pass"
 photos_entitlements="$repo_root/trawlers/photos/cmd/photoscrawl-fetch/PhotoKit.entitlements"
+dev_entitlements="$build_root/dev.entitlements"
 launch=1
 
 while [[ $# -gt 0 ]]; do
@@ -36,10 +37,16 @@ host_swift build --package-path "$app_dir" --configuration debug
 swift_bin="$(host_swift build --package-path "$app_dir" --configuration debug --show-bin-path)"
 
 rm -rf "$app"
-mkdir -p "$contents/MacOS" "$contents/Helpers" "$contents/Resources"
+mkdir -p "$contents/MacOS" "$contents/Helpers" "$contents/Frameworks" "$contents/Resources"
 cp "$swift_bin/Trawl" "$contents/MacOS/Trawl"
 cp "$repo_root/.dev/bin/trawl" "$contents/Helpers/trawl"
 chmod +x "$contents/MacOS/Trawl" "$contents/Helpers/trawl"
+sparkle_framework="$swift_bin/Sparkle.framework"
+[[ -d "$sparkle_framework" ]] || {
+  echo "dev-run: SwiftPM did not produce Sparkle.framework" >&2
+  exit 1
+}
+ditto "$sparkle_framework" "$contents/Frameworks/Sparkle.framework"
 
 echo "Building the signed Photos helper"
 (
@@ -97,17 +104,26 @@ plutil -insert NSHighResolutionCapable -bool true "$info"
 plutil -insert NSPhotoLibraryUsageDescription -string "OpenTrawl reads your photo library on this Mac so you can search your photos." "$info"
 
 echo "Signing the local app"
+cp "$photos_entitlements" "$dev_entitlements"
+/usr/libexec/PlistBuddy \
+  -c "Add :com.apple.security.cs.disable-library-validation bool true" \
+  "$dev_entitlements"
 "$repo_root/scripts/dev-cert"
 security unlock-keychain -p "$(<"$pass_file")" "$keychain"
 xattr -cr "$app"
-codesign --force --sign "$identity" --keychain "$keychain" \
-  --options runtime --timestamp=none "$contents/Helpers/trawl"
-codesign --force --sign "$identity" --keychain "$keychain" \
-  --options runtime --timestamp=none --entitlements "$photos_entitlements" \
-  "$contents/MacOS/Trawl"
-codesign --force --sign "$identity" --keychain "$keychain" \
-  --options runtime --timestamp=none --entitlements "$photos_entitlements" "$app"
-codesign --verify --deep --strict "$app"
+sign_args=(--force --sign "$identity" --keychain "$keychain" --options runtime --timestamp=none)
+sparkle="$contents/Frameworks/Sparkle.framework"
+codesign "${sign_args[@]}" "$sparkle/Versions/B/XPCServices/Installer.xpc"
+codesign "${sign_args[@]}" --preserve-metadata=entitlements \
+  "$sparkle/Versions/B/XPCServices/Downloader.xpc"
+codesign "${sign_args[@]}" "$sparkle/Versions/B/Autoupdate"
+codesign "${sign_args[@]}" "$sparkle/Versions/B/Updater.app"
+codesign "${sign_args[@]}" "$sparkle"
+codesign "${sign_args[@]}" --entitlements "$photos_entitlements" \
+  "$contents/Helpers/Photoscrawl Fetch.app"
+codesign "${sign_args[@]}" "$contents/Helpers/trawl"
+codesign "${sign_args[@]}" --entitlements "$dev_entitlements" "$app"
+codesign --verify --deep --strict --verbose=2 "$app"
 
 echo "Built $app"
 if [[ "$launch" -eq 1 ]]; then
