@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/opentrawl/opentrawl/trawlkit"
 	ckoutput "github.com/opentrawl/opentrawl/trawlkit/output"
@@ -91,6 +95,33 @@ type syncBatchLock struct {
 }
 
 func acquireSyncBatchLock(stateRoot string) (*syncBatchLock, error) {
+	lock, err := acquireArchiveOperationLock(stateRoot, "sync")
+	if err != nil {
+		var busy archiveOperationBusyError
+		if errors.As(err, &busy) {
+			return nil, syncAlreadyRunningError(busy)
+		}
+		return nil, err
+	}
+	return lock, nil
+}
+
+func acquireReplicationLock(stateRoot string) (*syncBatchLock, error) {
+	lock, err := acquireArchiveOperationLock(stateRoot, "replicate")
+	if err != nil {
+		var busy archiveOperationBusyError
+		if errors.As(err, &busy) {
+			return nil, replicateAlreadyRunningError(busy)
+		}
+		return nil, err
+	}
+	return lock, nil
+}
+
+// acquireArchiveOperationLock deliberately retains the historical sync.lock
+// filename. Older trawl builds already coordinate sync through that inode, so
+// changing the path would let an old sync overlap a new replication.
+func acquireArchiveOperationLock(stateRoot, operation string) (*syncBatchLock, error) {
 	root, err := trawlkit.ResolveStateRoot(stateRoot)
 	if err != nil {
 		return nil, err
@@ -103,13 +134,46 @@ func acquireSyncBatchLock(stateRoot string) (*syncBatchLock, error) {
 		return nil, fmt.Errorf("open sync lock: %w", err)
 	}
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		_ = file.Close()
 		if err == syscall.EWOULDBLOCK {
-			return nil, syncAlreadyRunningError{}
+			active := readArchiveOperation(file)
+			_ = file.Close()
+			return nil, archiveOperationBusyError{active: active}
 		}
+		_ = file.Close()
 		return nil, fmt.Errorf("lock sync: %w", err)
 	}
+	if err := file.Truncate(0); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("clear archive operation lock: %w", err)
+	}
+	if _, err := file.Seek(0, 0); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("rewind archive operation lock: %w", err)
+	}
+	if _, err := fmt.Fprintf(file, "operation=%s\npid=%d\nstarted_at=%s\n", operation, os.Getpid(), time.Now().UTC().Format(time.RFC3339)); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("write archive operation lock: %w", err)
+	}
 	return &syncBatchLock{file: file}, nil
+}
+
+func readArchiveOperation(file *os.File) string {
+	if file == nil {
+		return "sync"
+	}
+	_, _ = file.Seek(0, 0)
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		if value, found := strings.CutPrefix(scanner.Text(), "operation="); found {
+			value = strings.TrimSpace(value)
+			if value == "replicate" || value == "sync" {
+				return value
+			}
+		}
+	}
+	// A lock held by an older CLI contains no operation metadata. Such a
+	// holder can only be a sync, so that is the safe and truthful default.
+	return "sync"
 }
 
 func (lock *syncBatchLock) Close() error {
@@ -120,13 +184,39 @@ func (lock *syncBatchLock) Close() error {
 	return lock.file.Close()
 }
 
-type syncAlreadyRunningError struct{}
+type archiveOperationBusyError struct{ active string }
 
-func (syncAlreadyRunningError) Error() string { return "OpenTrawl is already syncing." }
+func (e archiveOperationBusyError) Error() string { return "OpenTrawl archive operation is busy" }
 
-func (syncAlreadyRunningError) ErrorBody() ckoutput.ErrorBody {
+type syncAlreadyRunningError struct{ active string }
+
+func (e syncAlreadyRunningError) Error() string {
+	if e.active == "replicate" {
+		return "OpenTrawl is currently replicating; sync cannot start."
+	}
+	return "OpenTrawl is already syncing."
+}
+
+func (e syncAlreadyRunningError) ErrorBody() ckoutput.ErrorBody {
 	return ckoutput.ErrorBody{
 		Code:    "already_syncing",
-		Message: "OpenTrawl is already syncing.",
+		Message: e.Error(),
 	}
+}
+
+type replicateAlreadyRunningError struct{ active string }
+
+func (e replicateAlreadyRunningError) Error() string {
+	if e.active == "replicate" {
+		return "OpenTrawl is already replicating."
+	}
+	return "OpenTrawl is currently syncing; replication cannot start."
+}
+
+func (e replicateAlreadyRunningError) ErrorBody() ckoutput.ErrorBody {
+	code := "already_syncing"
+	if e.active == "replicate" {
+		code = "already_replicating"
+	}
+	return ckoutput.ErrorBody{Code: code, Message: e.Error()}
 }

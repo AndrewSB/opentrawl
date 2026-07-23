@@ -9,21 +9,24 @@ import (
 	"github.com/opentrawl/opentrawl/trawlkit/config"
 )
 
-type sourcePaths struct {
+// SourcePaths is the complete path resolution used when executing one crawler.
+// Coordinators should use this value instead of reconstructing archive paths
+// from source ids.
+type SourcePaths struct {
 	StateRoot string
 	CrawlerID string
 	Base      string
 	Paths
 }
 
-func resolveSourcePaths(stateRoot string, info Info) (sourcePaths, error) {
+func resolveSourcePaths(stateRoot string, info Info) (SourcePaths, error) {
 	sourceID := strings.TrimSpace(info.ID)
 	if sourceID == "" {
-		return sourcePaths{}, errors.New("source id is required")
+		return SourcePaths{}, errors.New("source id is required")
 	}
 	root, err := ResolveStateRoot(stateRoot)
 	if err != nil {
-		return sourcePaths{}, err
+		return SourcePaths{}, err
 	}
 	base := filepath.Join(root, sourceID)
 	paths := Paths{
@@ -40,7 +43,7 @@ func resolveSourcePaths(stateRoot string, info Info) (sourcePaths, error) {
 	if strings.TrimSpace(info.DefaultPaths.Logs) != "" {
 		paths.Logs = config.ExpandHome(info.DefaultPaths.Logs)
 	}
-	return sourcePaths{
+	return SourcePaths{
 		StateRoot: root,
 		CrawlerID: sourceID,
 		Base:      base,

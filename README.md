@@ -11,10 +11,11 @@ archives, then searches them through one `trawl` command. In the beta, an agent
 can find a message, note or person and open its source-owned context without
 querying each app again.
 
-Source access and archives stay local. A read command may maintain a derived
-index, but it never syncs or changes a source app. Features that deliberately
-use a remote service must expose that boundary and send only the bounded input
-needed for the operation.
+Source access and archives stay local unless a person explicitly runs
+`replicate` to copy selected OpenTrawl-owned archives to a read replica. A read
+command may maintain a derived index, but it never syncs or changes a source
+app. Features that deliberately use a remote service expose that boundary and
+send only the bounded input needed for the operation.
 
 ## Build from source
 
@@ -60,12 +61,21 @@ trawl open imessage:msg/8842
 trawl telegram              # source-specific commands
 trawl contacts person list  # people in the Contacts archive
 trawl sync imessage telegram # explicitly refresh two archives
+trawl replicate --to archive.example:/srv/opentrawl imessage notes
 ```
 
 `status`, `search`, `open` and source-specific read commands use existing local
-archives. `sync` is the explicit operation that refreshes them. Normal text is
-the interface for people and agents. `--json` exists for scripts that need to
-compose command output mechanically.
+archives. `sync` is the explicit operation that refreshes them. `replicate`
+uses SQLite's transaction-aware remote-copy tool over SSH to update selected
+archives under another OpenTrawl state root. Sync and replication are mutually
+exclusive; reads remain available. Normal text is the interface for people and
+agents. `--json` exists for scripts that need to compose command output
+mechanically.
+
+Replication requires `sqlite3_rsync` on both hosts and `ssh` locally. Notes
+attachments additionally use `rsync`. The transfer is protected by SSH but the
+archive files are not encrypted by OpenTrawl; the destination must provide the
+intended storage and host security boundary.
 
 The cross-source commands use stable exit statuses: `0` means complete, `1`
 means failed, `2` means the command was used incorrectly, and `3` means the
