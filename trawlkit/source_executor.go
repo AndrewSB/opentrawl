@@ -51,6 +51,15 @@ func (e SourceExecutor) globals() globalOptions {
 	return globalOptions{stateRoot: e.opts.StateRoot, verbosity: e.opts.Verbosity}
 }
 
+// Paths resolves the same state root and crawler path overrides used by every
+// operation executed through this host boundary.
+func (e SourceExecutor) Paths(source Crawler) (SourcePaths, error) {
+	if source == nil {
+		return SourcePaths{}, errors.New("source is required")
+	}
+	return resolveSourcePaths(e.opts.StateRoot, source.Info())
+}
+
 func (e SourceExecutor) runTyped(ctx context.Context, source Crawler, verb targetVerb, operation typedSourceOperation) error {
 	if ctx == nil {
 		ctx = context.Background()

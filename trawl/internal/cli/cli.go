@@ -22,12 +22,13 @@ type CLI struct {
 	Verbose     int              `short:"v" name:"verbose" type:"counter" help:"Stream diagnostics to stderr; use -vv for debug detail"`
 	VersionFlag kong.VersionFlag `name:"version" help:"Print version and exit"`
 
-	Status StatusCmd `cmd:"" help:"Show crawler health"`
-	Sync   SyncCmd   `cmd:"" help:"Run crawls"`
-	Search SearchCmd `cmd:"" help:"Search crawler archives"`
-	Who    WhoCmd    `cmd:"" help:"Resolve a person or sender identity"`
-	Chats  ChatsCmd  `cmd:"" help:"List conversations across messaging sources"`
-	Open   OpenCmd   `cmd:"" help:"Open a crawler ref"`
+	Status    StatusCmd    `cmd:"" help:"Show crawler health"`
+	Sync      SyncCmd      `cmd:"" help:"Run crawls"`
+	Replicate ReplicateCmd `cmd:"" help:"Copy local archives to a remote read replica"`
+	Search    SearchCmd    `cmd:"" help:"Search crawler archives"`
+	Who       WhoCmd       `cmd:"" help:"Resolve a person or sender identity"`
+	Chats     ChatsCmd     `cmd:"" help:"List conversations across messaging sources"`
+	Open      OpenCmd      `cmd:"" help:"Open a crawler ref"`
 }
 
 type Runtime struct {
@@ -40,6 +41,7 @@ type Runtime struct {
 	timeout           time.Duration
 	log               *logRun
 	canonicalObserver canonicalConsumerObserver
+	replicationRunner replicationCommandRunner
 	stateRoot         string
 }
 
@@ -286,6 +288,7 @@ const trawlOutro = `The commands below run across every beta-visible source. Eac
 Examples:
   trawl status                          # every source: state, freshness, counts
   trawl sync telegram                   # refresh Telegram and update People
+  trawl replicate --to HOST:/srv/opentrawl imessage notes
   trawl search "boat trip"              # all sources, newest first
   trawl chats --with anna               # conversations across messaging sources
   trawl search imessage falafel         # one source, no quotes needed
@@ -306,7 +309,7 @@ func trawlDescription() string {
 // built-in command or an installed source — and lists the sources found,
 // so a mistyped source name reveals the namespace instead of hiding it.
 func unknownCommandErr(name string, sources []string) error {
-	message := fmt.Sprintf("unknown command %q - commands are status, sync, search, who, chats, open", name)
+	message := fmt.Sprintf("unknown command %q - commands are status, sync, replicate, search, who, chats, open", name)
 	if len(sources) > 0 {
 		message += "; sources are " + strings.Join(sources, ", ")
 	}

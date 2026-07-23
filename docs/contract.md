@@ -18,6 +18,7 @@ Cross-source operations live at the root:
 
 ```text
 trawl sync [source ...]
+trawl replicate --to USER@HOST:/absolute/state/root <source ...>
 trawl status [source]
 trawl search [source] <query>
 ```
@@ -39,6 +40,7 @@ The common control vocabulary is:
 | `metadata` | identity, capabilities and command manifest | no |
 | `status` | archive state, freshness and declared counts | no |
 | `sync` | refresh one or more archives through the root coordinator | yes |
+| `replicate` | copy selected OpenTrawl archives to a remote read replica | no local archive change; writes the replica |
 | `search` | bounded search over the archive | no |
 | `open` | one source-owned record with bounded context | no |
 
@@ -47,6 +49,20 @@ archive crawlers declare `sync`; the root coordinator uses that capability and
 performs dependent lifecycle work such as updating People. Sources may also
 declare capabilities such as `who`, short refs or source-specific list commands.
 Clients discover these from the manifest rather than assuming them.
+
+## Replication
+
+Replication is a root-coordinator operation, not a crawler capability. It
+copies only explicitly selected OpenTrawl-owned archives to the destination
+state root. It never reads a source application's database on the remote host
+and never copies crawler configuration, credentials, logs or lock files.
+
+`sync` and `replicate` acquire the same exclusive archive-operation lock and
+therefore cannot overlap. Read operations do not acquire that lock. SQLite
+archives are transferred with SQLite's transaction-aware remote-copy protocol,
+not an ordinary file copy, so each destination database is a consistent source
+snapshot. Notes attachment files transfer before the Notes database; remote
+deletion is outside the operation.
 
 ## Manifest
 

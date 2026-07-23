@@ -198,7 +198,7 @@ func executeSync(ctx context.Context, source Crawler, req *Request) (*SyncReport
 	return report, nil
 }
 
-func (r runner) openRunLog(paths sourcePaths, verb targetVerb, globals globalOptions, format output.Format, attach bool) (*cklog.Run, error) {
+func (r runner) openRunLog(paths SourcePaths, verb targetVerb, globals globalOptions, format output.Format, attach bool) (*cklog.Run, error) {
 	if verb.name == "metadata" {
 		return nil, nil
 	}
