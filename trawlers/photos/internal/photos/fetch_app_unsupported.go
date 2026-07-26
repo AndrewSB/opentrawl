@@ -7,6 +7,10 @@ import (
 	"errors"
 )
 
+func PhotoLibraryAccessStatusThroughApp(ctx context.Context, request bool) (string, error) {
+	return "", errors.New("signed Photos access status requires macOS")
+}
+
 func ExportOriginalResourceThroughApp(ctx context.Context, query OriginalExportQuery, destinationPath string, allowNetwork bool) error {
 	return errors.New("signed Photos original fetch app requires macOS")
 }
