@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
 	"strings"
 	"testing"
 )
@@ -127,12 +126,7 @@ func TestRunHumanUsageErrorStrings(t *testing.T) {
 
 func syntheticHome(t *testing.T) string {
 	t.Helper()
-	home, err := os.MkdirTemp("/private/tmp", "trawl-cli-home-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(home) })
-	return home
+	return t.TempDir()
 }
 
 func assertSingleJSONDocument(t *testing.T, data string, out any) {

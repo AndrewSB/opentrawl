@@ -31,6 +31,7 @@ import (
 )
 
 const fakeCrawlersEnv = "TRAWL_TEST_FAKE_CRAWLERS"
+const syntheticHomeEnv = "TRAWL_TEST_SYNTHETIC_HOME"
 
 // shortLocalTestTime renders a contract timestamp exactly the way the
 // human tables do, so expectations hold in any timezone.
@@ -336,18 +337,15 @@ func runCLITimeout(t *testing.T, timeout time.Duration, args ...string) (string,
 
 func syntheticHome(t *testing.T) string {
 	t.Helper()
-	home, err := os.MkdirTemp("/private/tmp", "trawl-cli-home-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	home := t.TempDir()
+	t.Setenv(syntheticHomeEnv, home)
 	return home
 }
 
 func ensureSyntheticHome(t *testing.T) string {
 	t.Helper()
 	home := os.Getenv("HOME")
-	if strings.HasPrefix(home, "/private/tmp/") {
+	if home != "" && home == os.Getenv(syntheticHomeEnv) {
 		return home
 	}
 	home = syntheticHome(t)
