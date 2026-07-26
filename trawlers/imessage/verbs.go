@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/opentrawl/opentrawl/trawlers/imessage/internal/archive"
 	"github.com/opentrawl/opentrawl/trawlkit"
@@ -20,6 +22,9 @@ type messagesOptions struct {
 	chatID   string
 	limit    int
 	limitSet bool
+	all      bool
+	after    string
+	before   string
 	asc      bool
 }
 
@@ -49,7 +54,7 @@ func (c *Crawler) Verbs() []trawlkit.Verb {
 		},
 		{
 			Name:  "messages",
-			Help:  "List archived iMessage messages in one chat.",
+			Help:  "List archived iMessage messages, optionally in one chat or time range.",
 			Flags: c.bindMessagesFlags,
 			Run:   c.runMessages,
 		},
@@ -58,8 +63,11 @@ func (c *Crawler) Verbs() []trawlkit.Verb {
 
 func (c *Crawler) bindMessagesFlags(fs *flag.FlagSet) {
 	c.messages = messagesOptions{limit: defaultMessageLimit}
-	fs.StringVar(&c.messages.chatID, "chat", "", "chat id")
+	fs.StringVar(&c.messages.chatID, "chat", "", "only messages in this chat")
 	fs.Var(intFlag{value: &c.messages.limit, seen: &c.messages.limitSet}, "limit", "maximum messages")
+	fs.BoolVar(&c.messages.all, "all", false, "show every matching message")
+	fs.StringVar(&c.messages.after, "after", "", "only messages at or after this date")
+	fs.StringVar(&c.messages.before, "before", "", "only messages at or before this date")
 	fs.BoolVar(&c.messages.asc, "asc", false, "show oldest messages first")
 }
 
@@ -113,9 +121,16 @@ func (c *Crawler) runMessages(ctx context.Context, req *trawlkit.Request) error 
 	if len(req.Args) != 0 {
 		return usageErr(errors.New("messages takes flags only"))
 	}
+	if c.messages.all && c.messages.limitSet {
+		return usageErr(errors.New("--all and --limit cannot be used together"))
+	}
+	chatID := ""
+	var err error
 	// A reader pastes the chats-table short ref; an agent passes the full
 	// imessage:chat/<id> ref or the raw id. All three resolve to the same chat.
-	chatID, err := req.ResolveChatArg(ctx, c.messages.chatID, archive.ChatRefPrefix)
+	if strings.TrimSpace(c.messages.chatID) != "" {
+		chatID, err = req.ResolveChatArg(ctx, c.messages.chatID, archive.ChatRefPrefix)
+	}
 	if errors.Is(err, trawlkit.ErrShortRefNotChat) {
 		return commandErr(1, "not_a_chat", errors.New("that short ref is a message, not a chat"), "run trawl imessage chats and copy a chat's ref")
 	}
@@ -125,35 +140,56 @@ func (c *Crawler) runMessages(ctx context.Context, req *trawlkit.Request) error 
 	if err != nil {
 		return err
 	}
-	if chatID == "" {
-		return usageErr(errors.New("messages requires --chat"))
+	rows := 0
+	if !c.messages.all {
+		rows, err = flags.Limit(c.messages.limit, c.messages.limitSet)
+		if err != nil {
+			return usageErr(err)
+		}
 	}
-	rows, err := flags.Limit(c.messages.limit, c.messages.limitSet)
+	after, hasAfter, err := parseMessageDate("--after", c.messages.after)
 	if err != nil {
 		return usageErr(err)
+	}
+	before, hasBefore, err := parseMessageDate("--before", c.messages.before)
+	if err != nil {
+		return usageErr(err)
+	}
+	if hasAfter && hasBefore && after > before {
+		return usageErr(errors.New("--after must not be later than --before"))
 	}
 	st, err := archive.UseExisting(ctx, req.Store, req.Paths.Archive)
 	if err != nil {
 		return archiveErr(fmt.Errorf("open archive: %w", err))
 	}
-	messages, err := st.Messages(ctx, chatID, rows, c.messages.asc)
+	page, err := st.ListMessages(ctx, archive.MessageListOptions{
+		ChatID: chatID, Limit: rows, After: after, HasAfter: hasAfter,
+		Before: before, HasBefore: hasBefore, Asc: c.messages.asc,
+	})
 	if err != nil {
 		return err
 	}
-	chat, err := st.Chat(ctx, chatID)
-	if errors.Is(err, archive.ErrChatNotFound) {
-		return commandErr(1, "not_found", fmt.Errorf("chat %s was not found", chatID), "run trawl imessage chats and use a current chat id")
-	}
-	if err != nil {
-		return err
-	}
-	total, err := st.CountMessages(ctx, chatID)
-	if err != nil {
-		return err
+	messages := listedMessageRows(page.Items)
+	var chat *archive.ChatSummary
+	if chatID != "" {
+		value, chatErr := st.Chat(ctx, chatID)
+		if errors.Is(chatErr, archive.ErrChatNotFound) {
+			return commandErr(1, "not_found", fmt.Errorf("chat %s was not found", chatID), "run trawl imessage chats and use a current chat id")
+		}
+		if chatErr != nil {
+			return chatErr
+		}
+		chat = &value
+		for index := range messages {
+			messages[index].Where = ""
+		}
 	}
 	refs := make([]string, 0, len(messages)+1)
-	chatRef := archive.ChatRef(chatID)
-	refs = append(refs, chatRef)
+	chatRef := ""
+	if chatID != "" {
+		chatRef = archive.ChatRef(chatID)
+		refs = append(refs, chatRef)
+	}
 	for index := range messages {
 		messages[index].Ref = archive.MessageRef(messages[index].MessageID)
 		refs = append(refs, messages[index].Ref)
@@ -166,7 +202,7 @@ func (c *Crawler) runMessages(ctx context.Context, req *trawlkit.Request) error 
 		messages[index].ShortRef = aliases[messages[index].Ref]
 	}
 	chatHandle := aliases[chatRef]
-	if chatHandle == "" {
+	if chatHandle == "" && chatID != "" {
 		chatHandle = chatID
 	}
 	order := "newest-first"
@@ -174,9 +210,9 @@ func (c *Crawler) runMessages(ctx context.Context, req *trawlkit.Request) error 
 		order = "oldest-first"
 	}
 	out := messageListOutput{
-		listHeader: newListHeader("messages", len(messages), total, rows),
+		listHeader: newListHeader("messages", len(messages), page.Total, rows),
 		ChatID:     chatID,
-		Chat:       &chat,
+		Chat:       chat,
 		Order:      order,
 		Items:      messages,
 		chatHandle: chatHandle,
@@ -187,6 +223,37 @@ func (c *Crawler) runMessages(ctx context.Context, req *trawlkit.Request) error 
 	return printMessagesText(req.Out, out)
 }
 
+func parseMessageDate(name, raw string) (int64, bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false, nil
+	}
+	value, err := flags.Date(raw)
+	if err != nil {
+		return 0, false, fmt.Errorf("%s: %w", name, err)
+	}
+	if name == "--before" {
+		if day, dayErr := time.ParseInLocation("2006-01-02", raw, time.Local); dayErr == nil {
+			value = day.Add(24*time.Hour - time.Second).UTC()
+		}
+	}
+	return archive.AppleDateFromTime(value), true, nil
+}
+
+func listedMessageRows(items []archive.SearchResult) []archive.MessageRow {
+	rows := make([]archive.MessageRow, 0, len(items))
+	for _, item := range items {
+		rows = append(rows, archive.MessageRow{
+			MessageID: item.MessageID, ChatID: item.ChatID, HandleID: item.HandleID,
+			SenderHandle: item.SenderHandle, SenderLabel: item.SenderLabel,
+			Time: item.Time, Service: item.Service, FromMe: item.FromMe,
+			Text: item.Text, HasAttachments: item.HasAttachments,
+			Where: searchChatDisplayName(item),
+		})
+	}
+	return rows
+}
+
 func publicMessages(value messageListOutput) trawlkit.MessageList {
 	messages := make([]trawlkit.Message, 0, len(value.Items))
 	where := ""
@@ -194,12 +261,16 @@ func publicMessages(value messageListOutput) trawlkit.MessageList {
 		where = outputField(chatConversation(*value.Chat))
 	}
 	for _, item := range value.Items {
+		itemWhere := where
+		if item.Where != "" {
+			itemWhere = outputField(item.Where)
+		}
 		messages = append(messages, trawlkit.Message{
 			Ref:      item.Ref,
 			ShortRef: item.ShortRef,
 			Time:     item.Time,
 			Who:      senderName(item.FromMe, item.SenderLabel),
-			Where:    where,
+			Where:    itemWhere,
 			Text:     displayMessageText(item.Text, item.HasAttachments),
 		})
 	}

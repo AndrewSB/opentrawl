@@ -25,11 +25,18 @@ func printMessagesText(w io.Writer, value messageListOutput) error {
 		conversation = chatConversation(*value.Chat)
 	}
 	heading := fmt.Sprintf("Messages in %s (chat %s): showing %s of %s, %s.", conversation, chatHandle, render.FormatInteger(int64(value.Returned)), render.FormatInteger(value.Total), value.Order)
+	if value.ChatID == "" {
+		heading = fmt.Sprintf("Messages: showing %s of %s, %s.", render.FormatInteger(int64(value.Returned)), render.FormatInteger(value.Total), value.Order)
+	}
 	var hints []string
 	if !value.Complete {
-		hints = append(hints,
-			fmt.Sprintf("More: trawl imessage messages --chat %s --limit %d", chatHandle, nextLimit(value.Limit, value.Total)),
-		)
+		if value.ChatID == "" {
+			hints = append(hints, "More: raise --limit, or list every match with --all")
+		} else {
+			hints = append(hints,
+				fmt.Sprintf("More: trawl imessage messages --chat %s --limit %d", chatHandle, nextLimit(value.Limit, value.Total)),
+			)
+		}
 	}
 	hints = append(hints, "Search: trawl imessage search QUERY")
 	items := make([]render.ListItem, 0, len(value.Items))
@@ -39,18 +46,26 @@ func printMessagesText(w io.Writer, value messageListOutput) error {
 			ref = item.Ref
 		}
 		items = append(items, render.ListItem{
-			Time: parseArchiveTime(item.Time),
-			Who:  senderName(item.FromMe, item.SenderLabel),
-			Ref:  ref,
-			Text: displayMessageText(item.Text, item.HasAttachments),
+			Time:  parseArchiveTime(item.Time),
+			Who:   senderName(item.FromMe, item.SenderLabel),
+			Where: item.Where,
+			Ref:   ref,
+			Text:  displayMessageText(item.Text, item.HasAttachments),
 		})
 	}
 	return render.WriteList(w, render.List{
 		Heading: heading,
 		Hints:   hints,
 		Items:   items,
-		Empty:   fmt.Sprintf("No messages in chat %s.", chatHandle),
+		Empty:   messagesEmptyText(value.ChatID, chatHandle),
 	})
+}
+
+func messagesEmptyText(chatID, chatHandle string) string {
+	if chatID == "" {
+		return "No messages."
+	}
+	return fmt.Sprintf("No messages in chat %s.", chatHandle)
 }
 
 func senderName(fromMe bool, label string) string {

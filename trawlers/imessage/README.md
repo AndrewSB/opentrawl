@@ -24,14 +24,16 @@ trawl sync imessage
 trawl imessage status
 trawl imessage chats --limit 20
 trawl imessage messages --chat CHAT_ID --limit 20
+trawl imessage messages --after 2026-01-01 --before 2026-01-31 --all
 trawl imessage who "Alice Example"
 trawl imessage search "candles budget" --who "Alice Example"
 trawl imessage open imessage:msg/8831
 ```
 
-Add `--json` for structured output. List commands are bounded and state how to
-request more rows. Search accepts a query, `--who`, `--after` and `--before`;
-one of those is required.
+Add `--json` for structured output. Message listing can span every chat or one
+selected with `--chat`; it accepts `--after`, `--before`, `--limit` or `--all`.
+List commands are bounded and state how to request more rows. Search accepts a
+query, `--who`, `--after` and `--before`; one of those is required.
 
 `open` returns the matched message with a bounded window from its chat. Contact
 export is intentionally narrow: display name and phone numbers only.
