@@ -29,6 +29,13 @@ type SyncResult struct {
 }
 
 func (c *SyncCmd) Run(r *Runtime) error {
+	if !acquisitionSupported {
+		return r.writeError(
+			"acquisition_unsupported",
+			"Source acquisition is not supported on this platform.",
+			"Read an existing OpenTrawl archive, or run sync on macOS and replicate its archive root.",
+		)
+	}
 	sourceIDs, sourceArgs, err := splitSyncArgs(c.Args)
 	if err != nil {
 		return err

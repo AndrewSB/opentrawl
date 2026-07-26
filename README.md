@@ -33,6 +33,45 @@ The installed Mac app includes the complete CLI at
 a source checkout. The app source is under `app/`. For development, the CLI and
 crawlers can also be built and used from the checkout.
 
+### Linux: read existing archives
+
+Linux supports the unified CLI as a read-only client for OpenTrawl archives
+created on macOS. Archives are plain SQLite files and keep the same layout and
+stable source-prefixed refs on both platforms. Linux does not discover or
+acquire data from Apple Messages, Notes, Contacts or Photos, integrate with the
+Mac app, run `sync`, or originate replication.
+
+Install Go 1.26.4 or newer and a C compiler toolchain, then build with cgo and
+SQLite FTS5 enabled:
+
+```sh
+git clone https://github.com/opentrawl/opentrawl
+cd opentrawl
+mkdir -p dist
+(cd trawl && CGO_ENABLED=1 GOFLAGS='-tags=sqlite_fts5' \
+  go build -o ../dist/trawl-linux-amd64 ./cmd/trawl)
+```
+
+The binary has no Nix or devenv runtime dependency. Point it at the root of an
+existing replica with `OPENTRAWL_STATE_ROOT`; each archive remains at
+`SOURCE/SOURCE.db` below that root:
+
+```sh
+OPENTRAWL_STATE_ROOT=/srv/opentrawl/replica ./dist/trawl-linux-amd64 status
+OPENTRAWL_STATE_ROOT=/srv/opentrawl/replica ./dist/trawl-linux-amd64 search "boat trip"
+OPENTRAWL_STATE_ROOT=/srv/opentrawl/replica ./dist/trawl-linux-amd64 open imessage:msg/8842
+```
+
+Linux supports `status`, `search`, `open`, `chats`, `who`, and source-specific
+commands that only read an archive. Acquisition, imports, archive mutation,
+`sync`, `replicate`, Apple framework access, and Mac application integration
+are unavailable and return structured errors. An existing archive is still
+discovered when its original macOS source application is unavailable.
+
+OpenTrawl archives contain private source data in clear SQLite files. Keep the
+replica and its backups access-controlled, prefer a read-only snapshot for
+Linux, and never print archive content or identifiers into shared logs.
+
 ## Use OpenTrawl with an agent
 
 OpenTrawl gives a coding agent searchable access to the local archive of your

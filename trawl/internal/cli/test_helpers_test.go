@@ -283,6 +283,9 @@ func (f *fakeCrawler) UnmarshalJSON(data []byte) error {
 }
 
 func TestMain(m *testing.M) {
+	// Most CLI tests exercise platform-neutral orchestration with synthetic
+	// crawlers. Platform contract tests restore the real build-tagged value.
+	acquisitionSupported = true
 	if len(os.Args) > 1 && os.Args[1] == trawlkit.HiddenWireSubcommand {
 		if path := os.Getenv(fakeCrawlersEnv); path != "" {
 			crawlers, err := loadFakeCrawlers(path)

@@ -94,6 +94,13 @@ func (r *Runtime) runNamespaceVerb(source Source, token string, rest []string) e
 	if firstNonFlag(rest) == "open" {
 		return r.runNamespaceOpen(source, rest)
 	}
+	if firstNonFlag(rest) == "sync" && !acquisitionSupported {
+		return r.writeError(
+			"acquisition_unsupported",
+			"Source acquisition is not supported on this platform.",
+			"Read an existing OpenTrawl archive, or run sync on macOS and replicate its archive root.",
+		)
+	}
 	if namespaceGroupHelp(source, rest) {
 		return r.runNamespaceTrawlkit(source, rest, false)
 	}
@@ -110,6 +117,13 @@ func (r *Runtime) runNamespaceVerb(source Source, token string, rest []string) e
 		return r.writeError("unknown_verb",
 			fmt.Sprintf("%s has no verb %q.", sourceHumanName(source), strings.Join(leading, " ")),
 			fmt.Sprintf("run trawl %s", token))
+	}
+	if command.Mutates && !acquisitionSupported {
+		return r.writeError(
+			"read_only_platform",
+			"Archive mutation is not supported on this platform.",
+			"Run this command on macOS; Linux can read an existing replicated archive root.",
+		)
 	}
 	return r.runNamespaceTrawlkit(source, rest, command.JSON)
 }

@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+work="$(mktemp -d "${TMPDIR:-/tmp}/opentrawl-linux-check.XXXXXX")"
+trap 'rm -rf "$work"' EXIT
+
+if [[ "$(go env GOOS)" != "linux" ]]; then
+  echo "check-linux must run on Linux" >&2
+  exit 2
+fi
+
+export CGO_ENABLED=1
+export GOFLAGS="-tags=sqlite_fts5"
+
+"$root/scripts/dev-bin"
+(
+  cd "$root/trawl"
+  go test ./...
+  go build -o "$work/trawl" ./cmd/trawl
+)
+
+state_root="$work/state"
+(
+  cd "$root/trawlers/imessage"
+  go run ./internal/testfixture/cmd/seed --archive "$state_root/imessage/imessage.db"
+)
+(
+  cd "$root/trawlers/whatsapp"
+  go run ./internal/testfixture/cmd/seed --archive "$state_root/whatsapp/whatsapp.db"
+)
+(
+  cd "$root/trawlers/notes"
+  go run ./internal/testfixture/cmd/seed --archive "$state_root/notes/notes.db"
+)
+(
+  cd "$root/trawlers/contacts"
+  go run ./internal/testfixture/cmd/seed \
+    --archive "$state_root/contacts/contacts.db" \
+    --id avery-example \
+    --name "Avery Example" \
+    --email avery@example.com
+)
+
+find "$state_root" -name '*.db' -type f -exec sha256sum {} + | sort >"$work/before.sha256"
+
+cli_env=(
+  HOME="$work/home"
+  OPENTRAWL_STATE_ROOT="$state_root"
+  PATH="/usr/bin:/bin"
+)
+mkdir -p "$work/home"
+
+/usr/bin/env -i "${cli_env[@]}" "$work/trawl" --help >/dev/null
+for source in imessage whatsapp notes contacts; do
+  /usr/bin/env -i "${cli_env[@]}" "$work/trawl" status "$source" >/dev/null
+  /usr/bin/env -i "${cli_env[@]}" "$work/trawl" search lantern --source "$source" |
+    grep -q 'lantern'
+done
+
+/usr/bin/env -i "${cli_env[@]}" "$work/trawl" open imessage:msg/1 | grep -q 'lantern'
+/usr/bin/env -i "${cli_env[@]}" "$work/trawl" open whatsapp:msg/synthetic-message | grep -q 'lantern'
+/usr/bin/env -i "${cli_env[@]}" "$work/trawl" open notes:note/synthetic-note | grep -q 'lantern'
+/usr/bin/env -i "${cli_env[@]}" "$work/trawl" open contacts:person/avery-example | grep -q 'Avery Example'
+/usr/bin/env -i "${cli_env[@]}" "$work/trawl" chats --limit 10 | grep -q 'Example Plans'
+
+set +e
+who_output=$(/usr/bin/env -i "${cli_env[@]}" "$work/trawl" who "Avery Example" 2>/dev/null)
+who_code=$?
+sync_output=$(/usr/bin/env -i "${cli_env[@]}" "$work/trawl" --json sync imessage 2>/dev/null)
+sync_code=$?
+set -e
+if [[ "$who_code" -ne 3 ]] || [[ "$who_output" != *"Avery Example"* ]]; then
+  echo "Linux who did not preserve the Contacts result across unavailable sources" >&2
+  exit 1
+fi
+if [[ "$sync_code" -ne 1 ]] || [[ "$sync_output" != *'"code":"acquisition_unsupported"'* ]]; then
+  echo "Linux sync did not return the structured unsupported error" >&2
+  exit 1
+fi
+
+find "$state_root" -name '*.db' -type f -exec sha256sum {} + | sort >"$work/after.sha256"
+diff -u "$work/before.sha256" "$work/after.sha256"
+
+echo "check-linux: ok"
