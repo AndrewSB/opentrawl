@@ -565,9 +565,10 @@ func (f *fakeSource) Verbs() []trawlkit.Verb {
 		verbName := name
 		limit := ""
 		verbs = append(verbs, trawlkit.Verb{
-			Name:  verbName,
-			Help:  command.Title,
-			Store: trawlkit.StoreNone,
+			Name:    verbName,
+			Help:    command.Title,
+			Mutates: command.Mutates,
+			Store:   trawlkit.StoreNone,
 			Flags: func(fs *flag.FlagSet) {
 				fs.StringVar(&limit, "limit", "", "limit")
 			},
