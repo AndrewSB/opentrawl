@@ -62,14 +62,19 @@ done
 /usr/bin/env -i "${cli_env[@]}" "$work/trawl" open whatsapp:msg/synthetic-message | grep -q 'lantern'
 /usr/bin/env -i "${cli_env[@]}" "$work/trawl" open notes:note/synthetic-note | grep -q 'lantern'
 /usr/bin/env -i "${cli_env[@]}" "$work/trawl" open contacts:person/avery-example | grep -q 'Avery Example'
-/usr/bin/env -i "${cli_env[@]}" "$work/trawl" chats --limit 10 | grep -q 'Example Plans'
 
 set +e
+chats_output=$(/usr/bin/env -i "${cli_env[@]}" "$work/trawl" chats --limit 10 2>/dev/null)
+chats_code=$?
 who_output=$(/usr/bin/env -i "${cli_env[@]}" "$work/trawl" who "Avery Example" 2>/dev/null)
 who_code=$?
 sync_output=$(/usr/bin/env -i "${cli_env[@]}" "$work/trawl" --json sync imessage 2>/dev/null)
 sync_code=$?
 set -e
+if [[ "$chats_code" -ne 3 ]] || [[ "$chats_output" != *"Example Plans"* ]]; then
+  echo "Linux chats did not preserve the messaging results across unavailable sources" >&2
+  exit 1
+fi
 if [[ "$who_code" -ne 3 ]] || [[ "$who_output" != *"Avery Example"* ]]; then
   echo "Linux who did not preserve the Contacts result across unavailable sources" >&2
   exit 1
