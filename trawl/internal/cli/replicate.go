@@ -36,6 +36,13 @@ type ReplicateResult struct {
 }
 
 func (c *ReplicateCmd) Run(r *Runtime) error {
+	if !acquisitionSupported {
+		return r.writeError(
+			"read_only_platform",
+			"Archive replication is not supported on this platform.",
+			"Replicate from macOS, then point the Linux CLI at the resulting archive root.",
+		)
+	}
 	destination, err := parseReplicationDestination(c.Destination)
 	if err != nil {
 		return usageErr{err}
