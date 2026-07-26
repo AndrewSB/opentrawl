@@ -27,6 +27,17 @@ target_stale() {
     -newer "$output" -print -quit)" ]]
 }
 
+target_buildable() {
+  local module_dir="$1"
+  local name="$2"
+  local buildable
+  buildable="$(
+    cd "$module_dir"
+    go list -e -f '{{if or .GoFiles .CgoFiles}}yes{{end}}' "./cmd/$name"
+  )"
+  [[ "$buildable" == "yes" ]]
+}
+
 # Go's build cache makes an unchanged rebuild fast (warm sequential measured
 # well under a second), so this always runs on shell entry rather than
 # skipping fresh targets. Quiet on a warm success (one summary line); a cold
@@ -48,6 +59,9 @@ while IFS= read -r go_mod; do
       continue
     fi
     name="$(basename "$target_dir")"
+    if ! target_buildable "$module_dir" "$name"; then
+      continue
+    fi
     output="$bin_dir/$name"
 
     target_count=$((target_count + 1))
@@ -81,6 +95,9 @@ while IFS= read -r go_mod; do
       continue
     fi
     name="$(basename "$target_dir")"
+    if ! target_buildable "$module_dir" "$name"; then
+      continue
+    fi
     output="$bin_dir/$name"
     module_path="${module_dir#./}"
 
