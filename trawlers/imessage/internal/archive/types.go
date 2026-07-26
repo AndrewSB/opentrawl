@@ -74,6 +74,17 @@ type MessageRow struct {
 	FromMe         bool   `json:"from_me"`
 	Text           string `json:"text,omitempty"`
 	HasAttachments bool   `json:"has_attachments,omitempty"`
+	Where          string `json:"-"`
+}
+
+type MessageListOptions struct {
+	ChatID    string
+	Limit     int
+	After     int64
+	HasAfter  bool
+	Before    int64
+	HasBefore bool
+	Asc       bool
 }
 
 type MessageContext struct {
@@ -86,10 +97,13 @@ type MessageContext struct {
 type SearchOptions struct {
 	Limit     int
 	Who       *WhoCandidate
+	ChatID    int64
+	HasChat   bool
 	After     int64
 	HasAfter  bool
 	Before    int64
 	HasBefore bool
+	Asc       bool
 }
 
 type SearchPage struct {

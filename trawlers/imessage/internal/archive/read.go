@@ -181,6 +181,40 @@ func (s *Store) SearchPage(ctx context.Context, query string, options SearchOpti
 	return SearchPage{Items: items, Total: total}, nil
 }
 
+// ListMessages returns source messages without applying full-text search.
+// ChatID is optional; omitting it lists across the archive exactly once per
+// message, even when Messages associates one message with multiple chats.
+func (s *Store) ListMessages(ctx context.Context, options MessageListOptions) (SearchPage, error) {
+	if s.schemaOutdated {
+		return SearchPage{}, ErrSchemaOutdated
+	}
+	searchOptions := SearchOptions{
+		Limit:     options.Limit,
+		After:     options.After,
+		HasAfter:  options.HasAfter,
+		Before:    options.Before,
+		HasBefore: options.HasBefore,
+		Asc:       options.Asc,
+	}
+	if strings.TrimSpace(options.ChatID) != "" {
+		chatID, err := parseID(options.ChatID, "chat")
+		if err != nil {
+			return SearchPage{}, err
+		}
+		searchOptions.ChatID = chatID
+		searchOptions.HasChat = true
+	}
+	items, err := s.searchResults(ctx, "", searchOptions)
+	if err != nil {
+		return SearchPage{}, err
+	}
+	var total int64
+	if err := s.store.DB().QueryRowContext(ctx, countSearchQuery("", searchOptions), searchArgs("", searchOptions)...).Scan(&total); err != nil {
+		return SearchPage{}, err
+	}
+	return SearchPage{Items: items, Total: total}, nil
+}
+
 func (s *Store) searchResults(ctx context.Context, query string, options SearchOptions) ([]SearchResult, error) {
 	limitClause := ""
 	args := searchArgs(query, options)
@@ -254,6 +288,9 @@ func searchArgs(query string, options SearchOptions) []any {
 	args := whoFilterArgs(who)
 	if strings.TrimSpace(query) != "" {
 		args = append(args, ftsQuery(query))
+	}
+	if options.HasChat {
+		args = append(args, options.ChatID)
 	}
 	if options.HasAfter {
 		args = append(args, options.After)

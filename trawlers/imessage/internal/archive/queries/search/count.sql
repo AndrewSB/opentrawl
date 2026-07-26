@@ -5,4 +5,5 @@ from messages m
 where 1 = 1
 {{FTS_FILTER}}
 {{WHO_FILTER}}
+{{CHAT_FILTER}}
 {{TIME_FILTER}}

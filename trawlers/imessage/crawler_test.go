@@ -16,8 +16,10 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/opentrawl/opentrawl/trawlers/imessage/internal/archive"
+	imessages "github.com/opentrawl/opentrawl/trawlers/imessage/internal/messages"
 	"github.com/opentrawl/opentrawl/trawlkit"
 	ckoutput "github.com/opentrawl/opentrawl/trawlkit/output"
 	ckstore "github.com/opentrawl/opentrawl/trawlkit/store"
@@ -51,6 +53,98 @@ func TestMessagesHumanOutputUsesShortRefsForRowsAndContinuation(t *testing.T) {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("human output missing %q:\n%s", want, stdout.String())
 		}
+	}
+}
+
+func TestMessagesListsArchiveWideBoundedWindowOnceInStableOrder(t *testing.T) {
+	ctx := context.Background()
+	archivePath := filepath.Join(t.TempDir(), "imessage.db")
+	st, err := archive.Open(ctx, archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := time.Date(2026, 7, 25, 9, 0, 0, 0, time.UTC)
+	window := first.Add(time.Hour)
+	data := imessages.ArchiveData{
+		SourcePath:       "synthetic-chat.db",
+		SourceModifiedAt: first,
+		ExtractedAt:      first,
+		Handles: []imessages.Handle{
+			{SourceRowID: 1, ID: "+15550001001", DisplayName: "Avery Example"},
+			{SourceRowID: 2, ID: "+15550001002", DisplayName: "Morgan Example"},
+		},
+		Chats: []imessages.Chat{
+			{SourceRowID: 1, GUID: "chat-one", DisplayName: "Project Lantern"},
+			{SourceRowID: 2, GUID: "chat-two", DisplayName: "Weekend Plans"},
+		},
+		Participants: []imessages.Participant{
+			{ChatRowID: 1, HandleRowID: 1},
+			{ChatRowID: 2, HandleRowID: 2},
+		},
+		ChatMessages: []imessages.ChatMessage{
+			{ChatRowID: 1, MessageRowID: 1},
+			{ChatRowID: 1, MessageRowID: 2},
+			{ChatRowID: 2, MessageRowID: 2},
+			{ChatRowID: 2, MessageRowID: 3},
+		},
+		Messages: []imessages.Message{
+			{SourceRowID: 1, GUID: "message-one", HandleRowID: 1, Date: archive.AppleDateFromTime(first), Text: "Outside window"},
+			{SourceRowID: 2, GUID: "message-two", HandleRowID: 1, Date: archive.AppleDateFromTime(window), Text: "First bounded message"},
+			{SourceRowID: 3, GUID: "message-three", HandleRowID: 2, Date: archive.AppleDateFromTime(window), Text: "Second bounded message"},
+		},
+	}
+	if err := st.ReplaceAll(ctx, data, nil, nil, first); err != nil {
+		_ = st.Close()
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	readStore := openReadStore(t, ctx, archivePath)
+	defer func() { _ = readStore.Close() }()
+	source := New()
+	fs := flag.NewFlagSet("messages", flag.ContinueOnError)
+	source.bindMessagesFlags(fs)
+	bound := window.Format(time.RFC3339)
+	if err := fs.Parse([]string{"--after", bound, "--before", bound, "--all", "--asc"}); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	req := &trawlkit.Request{
+		Store: readStore, Paths: trawlkit.Paths{Archive: archivePath},
+		Format: ckoutput.JSON, Out: &stdout,
+	}
+	if err := source.runMessages(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	var got trawlkit.MessageList
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Total != 2 || got.Truncated || len(got.Messages) != 2 {
+		t.Fatalf("bounded messages = %#v", got)
+	}
+	if got.Messages[0].Ref != "imessage:msg/2" || got.Messages[1].Ref != "imessage:msg/3" {
+		t.Fatalf("bounded message order = %#v", got.Messages)
+	}
+	for _, message := range got.Messages {
+		if message.Where == "" || message.Text == "" {
+			t.Fatalf("message lost source projection: %#v", message)
+		}
+	}
+}
+
+func TestMessagesRejectsAllWithLimitBeforeOpeningArchive(t *testing.T) {
+	source := New()
+	fs := flag.NewFlagSet("messages", flag.ContinueOnError)
+	source.bindMessagesFlags(fs)
+	if err := fs.Parse([]string{"--all", "--limit", "10"}); err != nil {
+		t.Fatal(err)
+	}
+	err := source.runMessages(context.Background(), &trawlkit.Request{})
+	if err == nil || !strings.Contains(err.Error(), "--all and --limit") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

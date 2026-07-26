@@ -117,11 +117,17 @@ const searchWhoFilter = `  and (
 
 const searchTimeAfterFilter = `  and m.date >= ?`
 const searchTimeBeforeFilter = `  and m.date <= ?`
+const searchChatFilter = `  and exists (
+    select 1 from chat_messages filter_cm
+    where filter_cm.message_rowid = m.source_rowid
+      and filter_cm.chat_rowid = ?
+  )`
 
 const searchFTSJoin = `join messages_fts on messages_fts.source_rowid = m.source_rowid`
 const searchFTSFilter = `  and messages_fts match ?`
 const searchFTSOrder = `rank, cm.chat_rowid`
 const searchNewestOrder = `m.date desc, m.source_rowid desc`
+const searchOldestOrder = `m.date asc, m.source_rowid asc`
 
 func searchQuery(limitClause string, searchText string, options SearchOptions) string {
 	who := candidateSearchWho(options.Who)
@@ -129,8 +135,9 @@ func searchQuery(limitClause string, searchText string, options SearchOptions) s
 	sqlText = strings.Replace(sqlText, "{{FTS_JOIN}}", searchFTSJoinClause(searchText), 1)
 	sqlText = strings.Replace(sqlText, "{{FTS_FILTER}}", searchFTSFilterClause(searchText), 1)
 	sqlText = strings.Replace(sqlText, "{{WHO_FILTER}}", searchFilterClause(who), 1)
+	sqlText = strings.Replace(sqlText, "{{CHAT_FILTER}}", searchChatFilterClause(options), 1)
 	sqlText = strings.Replace(sqlText, "{{TIME_FILTER}}", searchTimeFilterClause(options), 1)
-	sqlText = strings.Replace(sqlText, "{{ORDER}}", searchOrderClause(searchText), 1)
+	sqlText = strings.Replace(sqlText, "{{ORDER}}", searchOrderClause(searchText, options), 1)
 	return strings.Replace(sqlText, "{{LIMIT}}", limitClause, 1)
 }
 
@@ -140,6 +147,7 @@ func countSearchQuery(searchText string, options SearchOptions) string {
 	sqlText = strings.Replace(sqlText, "{{FTS_JOIN}}", searchFTSJoinClause(searchText), 1)
 	sqlText = strings.Replace(sqlText, "{{FTS_FILTER}}", searchFTSFilterClause(searchText), 1)
 	sqlText = strings.Replace(sqlText, "{{WHO_FILTER}}", searchFilterClause(who), 1)
+	sqlText = strings.Replace(sqlText, "{{CHAT_FILTER}}", searchChatFilterClause(options), 1)
 	return strings.Replace(sqlText, "{{TIME_FILTER}}", searchTimeFilterClause(options), 1)
 }
 
@@ -162,11 +170,21 @@ func searchFTSFilterClause(query string) string {
 	return searchFTSFilter
 }
 
-func searchOrderClause(query string) string {
+func searchOrderClause(query string, options SearchOptions) string {
 	if strings.TrimSpace(query) == "" {
+		if options.Asc {
+			return searchOldestOrder
+		}
 		return searchNewestOrder
 	}
 	return searchFTSOrder
+}
+
+func searchChatFilterClause(options SearchOptions) string {
+	if !options.HasChat {
+		return ""
+	}
+	return searchChatFilter
 }
 
 func searchWithClause(whoHandleCount int, includeWho bool) string {

@@ -38,6 +38,7 @@ left join (
 where 1 = 1
 {{FTS_FILTER}}
 {{WHO_FILTER}}
+{{CHAT_FILTER}}
 {{TIME_FILTER}}
 order by {{ORDER}}
 {{LIMIT}}
