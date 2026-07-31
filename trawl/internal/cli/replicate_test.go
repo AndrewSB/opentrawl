@@ -191,6 +191,61 @@ func TestReplicationRejectsArchiveOutsideStateRoot(t *testing.T) {
 	}
 }
 
+func TestReplicateAllSelectsEveryInstalledSourceAndNothingElse(t *testing.T) {
+	root := t.TempDir()
+	installed := canonicalSyncSources(discoverCrawlers(context.Background()))
+	if len(installed) == 0 {
+		t.Skip("no crawlers registered in this build")
+	}
+	executor := trawlkit.NewSourceExecutor(trawlkit.SourceExecutorOptions{StateRoot: root})
+	archives := make([]string, 0, len(installed))
+	for _, source := range installed {
+		resolved, err := executor.Paths(source.Crawler)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(resolved.Archive), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(resolved.Archive, []byte("synthetic sqlite placeholder"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		archives = append(archives, resolved.Archive)
+	}
+
+	runner := &recordingReplicationRunner{}
+	if err := (&ReplicateCmd{Destination: "archive.example:/srv/opentrawl", All: true}).Run(replicationTestRuntime(root, runner)); err != nil {
+		t.Fatal(err)
+	}
+	for _, archive := range archives {
+		if runner.commandIndex("sqlite3_rsync", archive) < 0 {
+			t.Errorf("--all skipped installed archive %q", archive)
+		}
+	}
+	if got := runner.countCommand("sqlite3_rsync"); got != len(archives) {
+		t.Fatalf("sqlite3_rsync calls = %d, want %d", got, len(archives))
+	}
+}
+
+func TestReplicateRefusesAnUnstatedSourceSelectionBeforeReachingTheReplica(t *testing.T) {
+	root := t.TempDir()
+	writeReplicationArchive(t, root, "imessage")
+	for name, command := range map[string]ReplicateCmd{
+		"no source and no --all": {Destination: "archive.example:/srv/opentrawl"},
+		"--all with a source":    {Destination: "archive.example:/srv/opentrawl", All: true, Sources: []string{"imessage"}},
+	} {
+		runner := &recordingReplicationRunner{}
+		err := command.Run(replicationTestRuntime(root, runner))
+		var usage usageErr
+		if !errors.As(err, &usage) {
+			t.Errorf("%s err=%#v, want usage error", name, err)
+		}
+		if len(runner.commands) != 0 {
+			t.Errorf("%s ran %#v before rejecting the selection", name, runner.commands)
+		}
+	}
+}
+
 func writeReplicationArchive(t *testing.T, root, source string) {
 	t.Helper()
 	directory := filepath.Join(root, source)

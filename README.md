@@ -101,13 +101,17 @@ trawl telegram              # source-specific commands
 trawl contacts person list  # people in the Contacts archive
 trawl sync imessage telegram # explicitly refresh two archives
 trawl replicate --to archive.example:/srv/opentrawl imessage notes
+trawl replicate --to archive.example:/srv/opentrawl --all # every installed source
 ```
 
 `status`, `search`, `open` and source-specific read commands use existing local
 archives. `sync` is the explicit operation that refreshes them. `replicate`
 uses SQLite's transaction-aware remote-copy tool over SSH to update selected
-archives under another OpenTrawl state root. Sync and replication are mutually
-exclusive; reads remain available. Normal text is the interface for people and
+archives under another OpenTrawl state root. Name the sources to replicate, or
+pass `--all` to state that every installed source should go; `replicate` with
+neither is a usage error rather than a whole-archive copy. Because `--all`
+follows the installed set, a source added later is included the next time it
+runs. Sync and replication are mutually exclusive; reads remain available. Normal text is the interface for people and
 agents. `--json` exists for scripts that need to compose command output
 mechanically.
 

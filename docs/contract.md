@@ -18,7 +18,7 @@ Cross-source operations live at the root:
 
 ```text
 trawl sync [source ...]
-trawl replicate --to USER@HOST:/absolute/state/root <source ...>
+trawl replicate --to USER@HOST:/absolute/state/root (<source ...> | --all)
 trawl status [source]
 trawl search [source] <query>
 ```
@@ -54,8 +54,11 @@ Clients discover these from the manifest rather than assuming them.
 
 Replication is a root-coordinator operation, not a crawler capability. It
 copies only explicitly selected OpenTrawl-owned archives to the destination
-state root. It never reads a source application's database on the remote host
-and never copies crawler configuration, credentials, logs or lock files.
+state root. The selection is always stated: named source ids, or `--all` for
+every installed source. The two are mutually exclusive, and a `replicate` that
+states neither is a usage error, so no invocation copies archives the person
+did not ask for. It never reads a source application's database on the remote
+host and never copies crawler configuration, credentials, logs or lock files.
 
 `sync` and `replicate` acquire the same exclusive archive-operation lock and
 therefore cannot overlap. Read operations do not acquire that lock. SQLite

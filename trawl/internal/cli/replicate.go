@@ -25,7 +25,8 @@ const (
 type ReplicateCmd struct {
 	Destination string        `name:"to" required:"" help:"Remote state root as USER@HOST:/absolute/path"`
 	Timeout     time.Duration `name:"timeout" default:"10m" help:"Maximum time for the complete replication"`
-	Sources     []string      `arg:"" name:"source" help:"One or more source ids to replicate"`
+	All         bool          `name:"all" help:"Replicate every installed source instead of a named selection"`
+	Sources     []string      `arg:"" optional:"" name:"source" help:"One or more source ids to replicate; omit only with --all"`
 }
 
 type ReplicateResult struct {
@@ -47,14 +48,28 @@ func (c *ReplicateCmd) Run(r *Runtime) error {
 	if err != nil {
 		return usageErr{err}
 	}
-	if len(c.Sources) == 0 {
-		return usageErr{errors.New("replicate requires at least one source")}
+	// Replication copies private archives off this Mac, so the set of sources is
+	// always something the person stated: named ids, or --all as a deliberate
+	// request for everything installed. A bare replicate is a usage error rather
+	// than a silent whole-archive push.
+	if c.All && len(c.Sources) > 0 {
+		return usageErr{errors.New("replicate accepts --all or a source list, not both")}
+	}
+	if !c.All && len(c.Sources) == 0 {
+		return usageErr{errors.New("replicate requires at least one source, or --all for every installed source")}
 	}
 	sources, err := r.selectedSourceArgs(c.Sources)
 	if err != nil {
 		return err
 	}
 	sources = canonicalSyncSources(sources)
+	if len(sources) == 0 {
+		return replicationError{
+			code:    "no_sources_installed",
+			message: "No installed source has an archive to replicate.",
+			remedy:  "run trawl status to see the available sources",
+		}
+	}
 
 	timeout := c.Timeout
 	if timeout <= 0 {
