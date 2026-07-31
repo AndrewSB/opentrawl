@@ -43,8 +43,19 @@ func (q *Queries) CountGroups(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countDuplicateMessageRows = `-- name: CountDuplicateMessageRows :one
+select count(*) - count(distinct msg_id) from messages
+`
+
+func (q *Queries) CountDuplicateMessageRows(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countDuplicateMessageRows)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countMediaMessages = `-- name: CountMediaMessages :one
-select count(*) from messages where media_type <> '' or media_path <> '' or media_url <> ''
+select count(distinct msg_id) from messages where media_type <> '' or media_path <> '' or media_url <> ''
 `
 
 func (q *Queries) CountMediaMessages(ctx context.Context) (int64, error) {
@@ -55,7 +66,7 @@ func (q *Queries) CountMediaMessages(ctx context.Context) (int64, error) {
 }
 
 const countMessages = `-- name: CountMessages :one
-select count(*) from messages
+select count(distinct msg_id) from messages
 `
 
 func (q *Queries) CountMessages(ctx context.Context) (int64, error) {

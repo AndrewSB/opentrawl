@@ -17,10 +17,17 @@ select count(*) from groups;
 select count(*) from group_participants;
 
 -- name: CountMessages :one
-select count(*) from messages;
+-- Counted in refs rather than rows: a message the source stored twice is one
+-- message, and one is all a reader can open or cite.
+select count(distinct msg_id) from messages;
+
+-- name: CountDuplicateMessageRows :one
+-- Rows the archive holds beyond the messages they name. The mirror keeps every
+-- row the source stored; this says how many of them a reader cannot reach.
+select count(*) - count(distinct msg_id) from messages;
 
 -- name: CountMediaMessages :one
-select count(*) from messages where media_type <> '' or media_path <> '' or media_url <> '';
+select count(distinct msg_id) from messages where media_type <> '' or media_path <> '' or media_url <> '';
 
 -- name: GetMessageTimeBounds :one
 select

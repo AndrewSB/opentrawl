@@ -35,7 +35,10 @@ func TestImportDesktopCoreDataShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Messages != 4 || status.MediaMessages != 1 || status.UnreadChats != 1 || status.UnreadMessages != 2 {
+	// The fixture stores four rows under three message ids. The import counts
+	// the rows it wrote; the archive counts what a reader can reach, and says
+	// how many rows it holds beyond them.
+	if status.Messages != 3 || status.DuplicateRows != 1 || status.MediaMessages != 1 || status.UnreadChats != 1 || status.UnreadMessages != 2 {
 		t.Fatalf("unexpected status: %+v", status)
 	}
 

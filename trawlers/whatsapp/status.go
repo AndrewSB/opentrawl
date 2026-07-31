@@ -52,6 +52,7 @@ func (c *Crawler) Status(ctx context.Context, req *trawlkit.Request) (*control.S
 func statusCounts(status store.Status) []control.Count {
 	counts := []control.Count{
 		control.NewCount("messages", "messages", int64(status.Messages)),
+		control.NewCount("duplicate_rows", "duplicate rows", int64(status.DuplicateRows)),
 		control.NewCount("media_messages", "media messages", int64(status.MediaMessages)),
 		control.NewCount("chats", "chats", int64(status.Chats)),
 		control.NewCount("unread_chats", "unread chats", int64(status.UnreadChats)),

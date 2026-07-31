@@ -92,7 +92,12 @@ type Status struct {
 	Contacts       int       `json:"contacts"`
 	Groups         int       `json:"groups"`
 	Participants   int       `json:"participants"`
+	// Messages counts refs, not rows: one message the source stored twice is one
+	// message, and one is all a reader can open or cite. DuplicateRows says how
+	// many rows the archive holds beyond them, so keeping every row the source
+	// stored stays visible rather than silently collapsed.
 	Messages       int       `json:"messages"`
+	DuplicateRows  int       `json:"duplicate_rows"`
 	MediaMessages  int       `json:"media_messages"`
 	OldestMessage  time.Time `json:"oldest_message,omitzero"`
 	NewestMessage  time.Time `json:"newest_message,omitzero"`

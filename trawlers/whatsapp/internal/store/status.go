@@ -32,6 +32,9 @@ func (s *Store) Status(ctx context.Context) (Status, error) {
 	if out.Messages, err = countInt(ctx, s.q.CountMessages); err != nil {
 		return out, err
 	}
+	if out.DuplicateRows, err = countInt(ctx, s.q.CountDuplicateMessageRows); err != nil {
+		return Status{}, err
+	}
 	if out.MediaMessages, err = countInt(ctx, s.q.CountMediaMessages); err != nil {
 		return out, err
 	}

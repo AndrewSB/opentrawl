@@ -187,7 +187,9 @@ the source's rows are real is not the mirror's decision to make. Resolution is:
   then by source row key;
 - `search` returns one hit per ref, and it is the same row `open` returns, so a
   hit and the record it opens are never different copies;
-- totals count refs rather than rows, for the same reason.
+- totals count refs rather than rows, for the same reason, and a source that
+  holds rows beyond them reports that as its own count rather than folding the
+  difference away.
 
 A source that can match one record in more than one place distinguishes those
 matches by anchor, not by returning the ref twice. A source with a single anchor
