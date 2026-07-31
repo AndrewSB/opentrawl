@@ -108,17 +108,17 @@ func (s *Store) Search(ctx context.Context, filter MessageFilter) ([]Message, er
 	args := []any{ftsQuery}
 	query, args = applyMessageFilters(query, args, filter, true)
 	query += " order by bm25(messages_fts) limit ?"
-	// An archive can hold the same message twice: WhatsApp's own id is unique
-	// per chat, and the messages table is keyed on the import's surrogate key
-	// instead. Ranking has to stay in SQL because bm25 cannot be used in an
-	// aggregate query, so the page is fetched with a margin and collapsed to the
-	// identity its open refs are built from.
+	// An archive can hold the same message twice: the mirrored source assigns
+	// its own row key, and a history re-sync can store one message under two of
+	// them. Ranking has to stay in SQL because bm25 cannot be used in an
+	// aggregate query, so the page is fetched with a margin and collapsed to one
+	// hit per ref afterwards.
 	args = append(args, searchScanLimit(filter.Limit))
 	messages, err := scanMessages(ctx, s.db, query, args...)
 	if err != nil {
 		return nil, err
 	}
-	messages = dedupeByReferenceIdentity(messages, filter.Limit)
+	messages = collapseToOneHitPerRef(messages, filter.Limit)
 	for i := range messages {
 		messages[i].Snippet = ckstore.FTS5Snippet(messageSnippetText(messages[i]), filter.Query)
 	}
@@ -149,7 +149,9 @@ func (s *Store) SearchCount(ctx context.Context, filter MessageFilter) (int, err
 	if err != nil {
 		return 0, err
 	}
-	query := `select count(distinct m.chat_jid || char(0) || m.msg_id) from messages_fts f join messages m on m.rowid=f.rowid where messages_fts match ?`
+	// Counted in refs, for the same reason the page is: one ref is one record,
+	// however many rows the mirror holds for it.
+	query := `select count(distinct m.msg_id) from messages_fts f join messages m on m.rowid=f.rowid where messages_fts match ?`
 	args := []any{ftsQuery}
 	query, args = applyMessageFilters(query, args, filter, true)
 	var total int
@@ -169,25 +171,46 @@ func searchScanLimit(limit int) int {
 	return limit * 2
 }
 
-// dedupeByReferenceIdentity keeps the first copy of each message, in the order
-// the ranking produced. Two rows that share a chat and a message id are one
-// message: they carry one open ref between them, so returning both would offer
-// the same record twice under the same name.
-func dedupeByReferenceIdentity(messages []Message, limit int) []Message {
-	seen := make(map[string]struct{}, len(messages))
+// collapseToOneHitPerRef returns one hit per canonical ref, keeping the copy
+// that MessageByID would open.
+//
+// A ref is the machine-facing identity of one record, and a search hit is one
+// match on it, so a page that named the same ref twice would offer one record
+// twice under one name — which the federation layer rejects outright. The
+// archive can still hold several rows for that ref, because it mirrors a source
+// that assigns its own row keys and can store a message under two of them.
+//
+// Which copy wins is not decided here: MessageByID already resolves a ref to
+// the newest row by (timestamp, source key), and search agrees with it so that
+// a hit and the record it opens are never different copies. Rank order is
+// preserved, so collapsing does not reorder the page.
+func collapseToOneHitPerRef(messages []Message, limit int) []Message {
+	position := make(map[string]int, len(messages))
 	out := messages[:0]
 	for _, message := range messages {
-		identity := message.ChatJID + "\x00" + message.MessageID
-		if _, exists := seen[identity]; exists {
+		at, exists := position[message.MessageID]
+		if !exists {
+			position[message.MessageID] = len(out)
+			out = append(out, message)
 			continue
 		}
-		seen[identity] = struct{}{}
-		out = append(out, message)
-		if limit > 0 && len(out) == limit {
-			break
+		if opensInsteadOf(message, out[at]) {
+			out[at] = message
 		}
 	}
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
 	return out
+}
+
+// opensInsteadOf reports whether candidate is the copy MessageByID would
+// return: the newest by timestamp, and by source key when the timestamps match.
+func opensInsteadOf(candidate, kept Message) bool {
+	if !candidate.Timestamp.Equal(kept.Timestamp) {
+		return candidate.Timestamp.After(kept.Timestamp)
+	}
+	return candidate.SourcePK > kept.SourcePK
 }
 
 func filterAllowsEmptyQuery(filter MessageFilter) bool {

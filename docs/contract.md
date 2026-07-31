@@ -177,6 +177,22 @@ Once assigned, a short ref is not moved or deleted. If a new ref collides with
 an existing alias, only the new alias grows beyond the collision; existing
 aliases do not change or shrink.
 
+A ref names one record even when the archive holds several rows for it. An
+archive mirrors a source that assigns its own row keys, and a source can store
+one record under two of them — a history re-sync that backfills a window it
+already holds is enough. The mirror keeps every row, because deciding which of
+the source's rows are real is not the mirror's decision to make. Resolution is:
+
+- `open` returns the newest row for the ref, by the record's own timestamp and
+  then by source row key;
+- `search` returns one hit per ref, and it is the same row `open` returns, so a
+  hit and the record it opens are never different copies;
+- totals count refs rather than rows, for the same reason.
+
+A source that can match one record in more than one place distinguishes those
+matches by anchor, not by returning the ref twice. A source with a single anchor
+therefore returns at most one hit per record.
+
 Open returns two views of the same source record:
 
 - a typed source-owned value for machine consumers; and

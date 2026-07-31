@@ -316,6 +316,67 @@ func TestSearchMatchesNonSequentialSourcePK(t *testing.T) {
 	}
 }
 
+func TestSearchReturnsOneHitPerRefAndOpensTheSameCopy(t *testing.T) {
+	// The mirrored source assigns its own row key, so one message can be stored
+	// under two of them; the archive keeps both because it is a mirror. A ref
+	// still names one record, and search and open have to agree on which copy.
+	ctx := context.Background()
+	st, err := Open(ctx, filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	first := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+	second := first.Add(time.Minute)
+	if err := st.ReplaceAll(
+		ctx,
+		ImportStats{FinishedAt: second},
+		nil,
+		[]Chat{{JID: "chat", Kind: "dm", Name: "Chat", LastMessageAt: second}},
+		nil,
+		nil,
+		[]Message{
+			{SourcePK: 10, ChatJID: "chat", ChatName: "Chat", MessageID: "shared", Timestamp: first, Text: "needle as first stored", RawType: 0},
+			{SourcePK: 20, ChatJID: "chat", ChatName: "Chat", MessageID: "shared", Timestamp: second, Text: "needle as stored again", RawType: 0},
+			{SourcePK: 30, ChatJID: "chat", ChatName: "Chat", MessageID: "other", Timestamp: second, Text: "needle elsewhere", RawType: 0},
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := st.Search(ctx, MessageFilter{Query: "needle", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs := map[string]Message{}
+	for _, message := range results {
+		if _, exists := refs[message.MessageID]; exists {
+			t.Fatalf("ref %q was returned twice: %+v", message.MessageID, results)
+		}
+		refs[message.MessageID] = message
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected one hit per ref, got %d: %+v", len(results), results)
+	}
+
+	opened, err := st.MessageByID(ctx, "shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refs["shared"].SourcePK != opened.SourcePK {
+		t.Fatalf("search returned source_pk %d but open returns %d", refs["shared"].SourcePK, opened.SourcePK)
+	}
+
+	total, err := st.SearchCount(ctx, MessageFilter{Query: "needle", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 2 {
+		t.Fatalf("expected the total to count refs, got %d", total)
+	}
+}
+
 func TestSearchWhoFilterMatchesParticipantsAndCounts(t *testing.T) {
 	ctx := context.Background()
 	st, err := Open(ctx, filepath.Join(t.TempDir(), "store.db"))
