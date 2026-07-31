@@ -59,6 +59,19 @@ func TestSearchAnswersOneHitPerRefWhenTheSourceStoredAMessageTwice(t *testing.T)
 		t.Fatal(err)
 	}
 
+	// Syncing migrates the archive, so the index the contact join needs is
+	// created by the sync that writes the archive rather than by hand. Without
+	// it every read of this source rebuilds the person corpus through a join no
+	// index can serve, which is minutes of CPU on a real archive.
+	readIndex := openReadStore(t, ctx, paths.Archive)
+	var indexName string
+	err = readIndex.DB().QueryRowContext(ctx,
+		`select name from sqlite_master where type = 'index' and name = 'idx_contacts_lid'`).Scan(&indexName)
+	_ = readIndex.Close()
+	if err != nil {
+		t.Fatalf("sync did not create the contact lookup index: %v", err)
+	}
+
 	// The archive keeps both rows. Deciding which of the source's rows are real
 	// is not the mirror's decision to make.
 	readStore := openReadStore(t, ctx, paths.Archive)
