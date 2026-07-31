@@ -83,6 +83,10 @@ func resolverMatchCandidate(person model.Person) whomatch.Candidate {
 	slug := model.Slug(person.Name)
 	aliases := []string{person.ID, person.SortName, slug, strings.ReplaceAll(slug, "-", " ")}
 	aliases = append(aliases, person.AKA...)
+	// A card names the person under spellings the display name never carries: a
+	// nickname, a maiden name, a phonetic form. Someone filed under a
+	// circumstance rather than a name is findable only by those.
+	aliases = append(aliases, person.SearchNames()...)
 	aliases = append(aliases, person.Tags...)
 	for _, source := range person.Sources {
 		aliases = append(aliases, source.Names...)

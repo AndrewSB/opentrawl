@@ -74,6 +74,47 @@ func TestContactSnapshotStoresAndReplacesTheWholeCard(t *testing.T) {
 	}
 }
 
+// TestWhoResolvesACardNameThatIsNotTheDisplayName covers a contact filed under
+// a circumstance — where and when they were met — rather than under a name.
+// Their card still names them, so resolving that nickname or maiden name has to
+// find them even though their display name never contains it.
+func TestWhoResolvesACardNameThatIsNotTheDisplayName(t *testing.T) {
+	ctx := context.Background()
+	st := openTempStore(t)
+	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	if _, err := st.SyncContactSnapshot(ctx, "apple", []model.SourceContact{
+		{
+			ExternalID: "apple-1",
+			Name:       "2026-03-02 pottery class",
+			Card:       model.Card{Nickname: "Sasha", PreviousFamilyName: "Quill"},
+			// Nothing outside the card carries either name, so a match proves
+			// the card was read and not the address.
+			Emails: []model.ContactValue{{Value: "tuesday.evenings@example.com"}},
+			Phones: []model.ContactValue{{Value: "+15550100"}},
+		},
+		{
+			ExternalID: "apple-2",
+			Name:       "Rin Marlow",
+			Emails:     []model.ContactValue{{Value: "rin@example.com"}},
+			Phones:     []model.ContactValue{{Value: "+15550101"}},
+		},
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, query := range []string{"Sasha", "Quill"} {
+		candidates, err := st.ResolvePeople(ctx, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Exactly one: the contact whose card states no names must not answer
+		// to a name it never carried.
+		if len(candidates) != 1 || candidates[0].Who != "2026-03-02 pottery class" {
+			t.Fatalf("who %q = %#v", query, candidates)
+		}
+	}
+}
+
 // TestArchiveMigratesPreCardSchema opens an archive written before contact
 // cards existed. Its rows must survive, and it must accept the card value
 // kinds its own CREATE TABLE never allowed.

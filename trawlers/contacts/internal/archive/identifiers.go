@@ -77,7 +77,7 @@ func (s *Store) personIDByIdentifier(ctx context.Context, kind, value string) (s
 }
 
 func (s *Store) personIDsBySlugOrName(ctx context.Context, query string) ([]string, error) {
-	rows, err := s.database().QueryContext(ctx, `select id, name, aka_json, sources_json from people order by name, id`)
+	rows, err := s.database().QueryContext(ctx, `select id, name, card_json, aka_json, sources_json from people order by name, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -86,8 +86,8 @@ func (s *Store) personIDsBySlugOrName(ctx context.Context, query string) ([]stri
 	slug := model.Slug(query)
 	var ids []string
 	for rows.Next() {
-		var id, name, akaJSON, sourcesJSON string
-		if err := rows.Scan(&id, &name, &akaJSON, &sourcesJSON); err != nil {
+		var id, name, cardJSON, akaJSON, sourcesJSON string
+		if err := rows.Scan(&id, &name, &cardJSON, &akaJSON, &sourcesJSON); err != nil {
 			return nil, err
 		}
 		switch {
@@ -97,6 +97,9 @@ func (s *Store) personIDsBySlugOrName(ctx context.Context, query string) ([]stri
 			ids = append(ids, id)
 		default:
 			person := model.Person{Name: name}
+			if err := decodeJSON(cardJSON, &person.Card); err != nil {
+				return nil, err
+			}
 			if err := decodeJSONList(akaJSON, &person.AKA); err != nil {
 				return nil, err
 			}
@@ -111,23 +114,37 @@ func (s *Store) personIDsBySlugOrName(ctx context.Context, query string) ([]stri
 	return ids, rows.Err()
 }
 
+// personAliasMatches reports whether the query names the person by something
+// other than their display name: a stated alias, a card field that spells the
+// name differently, or a name one source knows them by. A contact filed under a
+// circumstance rather than a name — where and when they were met — is reachable
+// only this way, so the card names belong here and not only in the search index.
 func personAliasMatches(person model.Person, slug, normalizedQuery string) bool {
-	for _, alias := range person.AKA {
-		if model.Slug(alias) == slug {
-			return true
-		}
-		if normalizedQuery != "" && strings.Contains(model.NormalizeName(alias), normalizedQuery) {
+	for _, names := range [][]string{person.AKA, person.SearchNames()} {
+		if nameMatches(names, slug, normalizedQuery) {
 			return true
 		}
 	}
 	for _, source := range person.Sources {
-		for _, name := range source.Names {
-			if model.Slug(name) == slug {
-				return true
-			}
-			if normalizedQuery != "" && strings.Contains(model.NormalizeName(name), normalizedQuery) {
-				return true
-			}
+		if nameMatches(source.Names, slug, normalizedQuery) {
+			return true
+		}
+	}
+	return false
+}
+
+// nameMatches skips blanks: a card states only the fields its source filled in,
+// so an unset nickname must not answer to every query.
+func nameMatches(names []string, slug, normalizedQuery string) bool {
+	for _, name := range names {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		if model.Slug(name) == slug {
+			return true
+		}
+		if normalizedQuery != "" && strings.Contains(model.NormalizeName(name), normalizedQuery) {
+			return true
 		}
 	}
 	return false
