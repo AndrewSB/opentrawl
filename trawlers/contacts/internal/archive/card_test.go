@@ -3,6 +3,7 @@ package archive
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -112,6 +113,44 @@ func TestWhoResolvesACardNameThatIsNotTheDisplayName(t *testing.T) {
 		if len(candidates) != 1 || candidates[0].Who != "2026-03-02 pottery class" {
 			t.Fatalf("who %q = %#v", query, candidates)
 		}
+		// The alias that matched has to be reported, or a caller grading the
+		// match cannot see why this person answered and ranks them last.
+		if !slices.Contains(candidates[0].Aliases, query) {
+			t.Fatalf("who %q reported aliases %#v", query, candidates[0].Aliases)
+		}
+		if candidates[0].MatchQuality != "exact" {
+			t.Fatalf("who %q match quality = %q", query, candidates[0].MatchQuality)
+		}
+	}
+}
+
+// An organization names an employer, not a party to a conversation. It may find
+// a Person, and it must not be offered as evidence of who someone is.
+func TestOrganizationFindsAPersonWithoutBecomingTheirIdentity(t *testing.T) {
+	ctx := context.Background()
+	st := openTempStore(t)
+	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	if _, err := st.SyncContactSnapshot(ctx, "apple", []model.SourceContact{{
+		ExternalID: "apple-1",
+		Name:       "Rin Marlow",
+		Card:       model.Card{Nickname: "Rinny", OrganizationName: "Analytical Engines"},
+		Emails:     []model.ContactValue{{Value: "rin@example.com"}},
+	}}, now); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates, err := st.ResolvePeople(ctx, "Analytical Engines")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || candidates[0].Who != "Rin Marlow" {
+		t.Fatalf("who = %#v", candidates)
+	}
+	if slices.Contains(candidates[0].Aliases, "Analytical Engines") {
+		t.Fatalf("an employer escaped into chat identity aliases: %#v", candidates[0].Aliases)
+	}
+	if !slices.Contains(candidates[0].Aliases, "Rinny") {
+		t.Fatalf("a nickname is identity and must be reported: %#v", candidates[0].Aliases)
 	}
 }
 

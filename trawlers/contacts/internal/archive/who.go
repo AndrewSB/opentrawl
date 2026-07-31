@@ -66,6 +66,10 @@ func resolvePersonCandidate(person model.Person, query string) (WhoCandidate, bo
 func resolverIdentityAliases(person model.Person) []string {
 	aliases := []string{person.SortName}
 	aliases = append(aliases, person.AKA...)
+	// A nickname or maiden name on the card is a real name for this person, so
+	// it is identity. The organization on the same card is not, which is why
+	// this takes PersonNames rather than the wider SearchNames.
+	aliases = append(aliases, person.PersonNames()...)
 	for _, source := range person.Sources {
 		aliases = append(aliases, source.Names...)
 	}

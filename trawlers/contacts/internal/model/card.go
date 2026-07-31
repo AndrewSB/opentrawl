@@ -73,10 +73,11 @@ func (c Card) Fill(other Card) Card {
 	return c
 }
 
-// SearchNames are the card fields that name the person under a different
-// spelling. They belong in the alias index so that searching a nickname,
-// maiden name or phonetic spelling finds the Person.
-func (c Card) SearchNames() []string {
+// PersonNames are the card fields that name the person themselves under a
+// different spelling: a nickname, a maiden name, a phonetic form. They are
+// identity, so they may be offered as evidence that a chat participant is this
+// person.
+func (c Card) PersonNames() []string {
 	c = c.Clean()
 	return []string{
 		c.Nickname,
@@ -84,7 +85,13 @@ func (c Card) SearchNames() []string {
 		c.PhoneticGivenName,
 		c.PhoneticMiddleName,
 		c.PhoneticFamilyName,
-		c.PhoneticOrganizationName,
-		c.OrganizationName,
 	}
+}
+
+// SearchNames are the card fields worth finding a Person by. They add the
+// organization to PersonNames, which helps a search locate someone by where
+// they work but never says the two are the same party.
+func (c Card) SearchNames() []string {
+	c = c.Clean()
+	return append(c.PersonNames(), c.PhoneticOrganizationName, c.OrganizationName)
 }
