@@ -108,11 +108,17 @@ func (s *Store) Search(ctx context.Context, filter MessageFilter) ([]Message, er
 	args := []any{ftsQuery}
 	query, args = applyMessageFilters(query, args, filter, true)
 	query += " order by bm25(messages_fts) limit ?"
-	args = append(args, filter.Limit)
+	// An archive can hold the same message twice: WhatsApp's own id is unique
+	// per chat, and the messages table is keyed on the import's surrogate key
+	// instead. Ranking has to stay in SQL because bm25 cannot be used in an
+	// aggregate query, so the page is fetched with a margin and collapsed to the
+	// identity its open refs are built from.
+	args = append(args, searchScanLimit(filter.Limit))
 	messages, err := scanMessages(ctx, s.db, query, args...)
 	if err != nil {
 		return nil, err
 	}
+	messages = dedupeByReferenceIdentity(messages, filter.Limit)
 	for i := range messages {
 		messages[i].Snippet = ckstore.FTS5Snippet(messageSnippetText(messages[i]), filter.Query)
 	}
@@ -143,7 +149,7 @@ func (s *Store) SearchCount(ctx context.Context, filter MessageFilter) (int, err
 	if err != nil {
 		return 0, err
 	}
-	query := `select count(*) from messages_fts f join messages m on m.rowid=f.rowid where messages_fts match ?`
+	query := `select count(distinct m.chat_jid || char(0) || m.msg_id) from messages_fts f join messages m on m.rowid=f.rowid where messages_fts match ?`
 	args := []any{ftsQuery}
 	query, args = applyMessageFilters(query, args, filter, true)
 	var total int
@@ -151,6 +157,37 @@ func (s *Store) SearchCount(ctx context.Context, filter MessageFilter) (int, err
 		return 0, err
 	}
 	return total, nil
+}
+
+// searchScanLimit asks for enough rows that collapsing duplicates still fills a
+// page. A page that came back short would read as a smaller result set than the
+// archive holds.
+func searchScanLimit(limit int) int {
+	if limit <= 0 {
+		return limit
+	}
+	return limit * 2
+}
+
+// dedupeByReferenceIdentity keeps the first copy of each message, in the order
+// the ranking produced. Two rows that share a chat and a message id are one
+// message: they carry one open ref between them, so returning both would offer
+// the same record twice under the same name.
+func dedupeByReferenceIdentity(messages []Message, limit int) []Message {
+	seen := make(map[string]struct{}, len(messages))
+	out := messages[:0]
+	for _, message := range messages {
+		identity := message.ChatJID + "\x00" + message.MessageID
+		if _, exists := seen[identity]; exists {
+			continue
+		}
+		seen[identity] = struct{}{}
+		out = append(out, message)
+		if limit > 0 && len(out) == limit {
+			break
+		}
+	}
+	return out
 }
 
 func filterAllowsEmptyQuery(filter MessageFilter) bool {
