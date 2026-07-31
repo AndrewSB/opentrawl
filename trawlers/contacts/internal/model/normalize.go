@@ -68,7 +68,18 @@ func plausibleSubscriberLength(length int) bool {
 }
 
 func NormalizeName(name string) string {
-	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(name))), " ")
+	return NormalizeValue(name)
+}
+
+// NormalizeValue is the dedupe key for labelled card values that carry no
+// format of their own: social handles, instant message addresses, dates and
+// related names.
+func NormalizeValue(value string) string {
+	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(value))), " ")
+}
+
+func NormalizeURL(value string) string {
+	return strings.TrimRight(NormalizeValue(value), "/")
 }
 
 func PathSlug(path string) string {

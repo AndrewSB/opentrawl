@@ -73,7 +73,7 @@ func ensureCurrentSchema(ctx context.Context, st *ckstore.Store) error {
 	if err != nil {
 		return err
 	}
-	if _, err := st.DB().ExecContext(ctx, schema+shortref.Schema); err != nil {
+	if _, err := st.DB().ExecContext(ctx, schema+contactValuesTable+contactValuesIndex+shortref.Schema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
 	if current == SchemaVersion {
@@ -95,6 +95,11 @@ func archiveTablesAbsent(ctx context.Context, db *sql.DB) (bool, error) {
 
 func migrateSchema(ctx context.Context, st *ckstore.Store, current int) error {
 	return st.WithTx(ctx, func(tx *sql.Tx) error {
+		if current < cardSchemaVersion {
+			if err := migrateToCardSchema(ctx, tx); err != nil {
+				return err
+			}
+		}
 		if _, err := tx.ExecContext(ctx, `create table if not exists schema_migrations(version integer not null)`); err != nil {
 			return fmt.Errorf("ensure schema_migrations: %w", err)
 		}
@@ -106,6 +111,63 @@ func migrateSchema(ctx context.Context, st *ckstore.Store, current int) error {
 		}
 		return nil
 	})
+}
+
+// migrateToCardSchema widens an archive written before contact cards were
+// stored. The people table gains the card column, and contact_values is
+// rebuilt because its kind constraint predates the card value kinds. Existing
+// rows are carried over unchanged: no stored fact is recomputed here.
+func migrateToCardSchema(ctx context.Context, tx *sql.Tx) error {
+	hasCard, err := columnExists(ctx, tx, "people", "card_json")
+	if err != nil {
+		return err
+	}
+	if !hasCard {
+		if _, err := tx.ExecContext(ctx, `alter table people add column card_json text not null default '{}'`); err != nil {
+			return fmt.Errorf("add people.card_json: %w", err)
+		}
+	}
+	var definition string
+	if err := tx.QueryRowContext(ctx, `select sql from sqlite_master where type = 'table' and name = 'contact_values'`).Scan(&definition); err != nil {
+		return fmt.Errorf("read contact_values definition: %w", err)
+	}
+	if strings.Contains(definition, "url_address") {
+		return nil
+	}
+	for _, statement := range []string{
+		`drop index if exists idx_contact_values_person`,
+		`alter table contact_values rename to contact_values_legacy`,
+		contactValuesTable,
+		`insert into contact_values(person_id, kind, position, value, label, source, primary_value)
+		 select person_id, kind, position, value, label, source, primary_value from contact_values_legacy`,
+		`drop table contact_values_legacy`,
+		contactValuesIndex,
+	} {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("rebuild contact_values: %w", err)
+		}
+	}
+	return nil
+}
+
+func columnExists(ctx context.Context, tx *sql.Tx, table, column string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, "pragma table_info("+table+")")
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, columnType string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, rows.Err()
+		}
+	}
+	return false, rows.Err()
 }
 
 func (s *Store) Close() error {

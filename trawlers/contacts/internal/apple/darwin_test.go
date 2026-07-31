@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/opentrawl/opentrawl/trawlers/contacts/internal/model"
 )
 
 func TestCheckSourceAtUsesOnlyAddressBookSchema(t *testing.T) {
@@ -121,15 +124,27 @@ func TestReadAddressBookDirReadsRootAndSourceDatabases(t *testing.T) {
 		LastName:   "Contact",
 		Emails:     []string{"root@example.com"},
 	}})
+	birthday := time.Date(1815, 12, 10, 12, 0, 0, 0, time.UTC)
 	sourceDir := filepath.Join(dir, "Sources", "source-1")
 	createAddressBookFixture(t, filepath.Join(sourceDir, addressBookDBName), []fixtureContact{{
-		PK:         1,
-		Identifier: "source-contact:ABPerson",
-		FirstName:  "Ada",
-		MiddleName: "Augusta",
-		LastName:   "Lovelace",
-		Phones:     []string{"+1 555 0100"},
-		Emails:     []string{"ada@example.com"},
+		PK:            1,
+		Identifier:    "source-contact:ABPerson",
+		FirstName:     "Ada",
+		MiddleName:    "Augusta",
+		LastName:      "Lovelace",
+		MaidenName:    "Byron",
+		Prefix:        "Dr",
+		Suffix:        "PhD",
+		Nickname:      "Countess",
+		PhoneticFirst: "AY-duh",
+		PhoneticLast:  "LUV-lace",
+		Organisation:  "Analytical Engines",
+		Department:    "Research",
+		JobTitle:      "Mathematician",
+		Birthday:      &birthday,
+		Note:          "Met at the synthetic conference.",
+		Phones:        []string{"+1 555 0100"},
+		Emails:        []string{"ada@example.com"},
 		Address: fixtureAddress{
 			Label:       "_$!<Work>!$_",
 			Street:      "1 Infinite Loop",
@@ -139,7 +154,12 @@ func TestReadAddressBookDirReadsRootAndSourceDatabases(t *testing.T) {
 			CountryName: "United States",
 			CountryCode: "US",
 		},
-		Avatar: []byte("avatar"),
+		URLs:      []string{"https://example.com/ada"},
+		Social:    []fixtureService{{Service: "Mastodon", Value: "ada"}},
+		Messaging: []fixtureService{{Service: "Signal", Value: "+15550100"}},
+		Dates:     []fixtureDate{{Label: "_$!<Anniversary>!$_", When: time.Date(2015, 7, 8, 12, 0, 0, 0, time.UTC)}},
+		Related:   []fixtureService{{Service: "_$!<Spouse>!$_", Value: "Grace Example"}},
+		Avatar:    []byte("avatar"),
 	}})
 
 	contacts, err := readAddressBookDir(t.Context(), dir)
@@ -156,10 +176,10 @@ func TestReadAddressBookDirReadsRootAndSourceDatabases(t *testing.T) {
 	if source.Name() != "Ada Augusta Lovelace" {
 		t.Fatalf("name = %q", source.Name())
 	}
-	if len(source.Phones) != 1 || source.Phones[0] != "+1 555 0100" {
+	if len(source.Phones) != 1 || source.Phones[0].Value != "+1 555 0100" || source.Phones[0].Label != "_$!<Mobile>!$_" {
 		t.Fatalf("phones = %#v", source.Phones)
 	}
-	if len(source.Emails) != 1 || source.Emails[0] != "ada@example.com" {
+	if len(source.Emails) != 1 || source.Emails[0].Value != "ada@example.com" {
 		t.Fatalf("emails = %#v", source.Emails)
 	}
 	if len(source.Addresses) != 1 {
@@ -175,12 +195,102 @@ func TestReadAddressBookDirReadsRootAndSourceDatabases(t *testing.T) {
 		t.Fatalf("avatar = %q", source.AvatarData)
 	}
 
+	wantCard := model.Card{
+		GivenName: "Ada", MiddleName: "Augusta", FamilyName: "Lovelace", PreviousFamilyName: "Byron",
+		NamePrefix: "Dr", NameSuffix: "PhD", Nickname: "Countess",
+		PhoneticGivenName: "AY-duh", PhoneticFamilyName: "LUV-lace",
+		OrganizationName: "Analytical Engines", DepartmentName: "Research", JobTitle: "Mathematician",
+		Birthday: "1815-12-10", Note: "Met at the synthetic conference.",
+	}
+	if source.Card != wantCard {
+		t.Fatalf("card = %#v, want %#v", source.Card, wantCard)
+	}
+
 	src := source.SourceContact(true)
 	if len(src.Addresses) != 1 || src.Addresses[0].Label != "work" || src.Addresses[0].Source != "apple" {
 		t.Fatalf("source address = %#v", src.Addresses)
 	}
+	if len(src.Phones) != 1 || src.Phones[0].Label != "mobile" {
+		t.Fatalf("source phone label = %#v", src.Phones)
+	}
+	if len(src.Emails) != 1 || src.Emails[0].Label != "home" {
+		t.Fatalf("source email label = %#v", src.Emails)
+	}
+	if src.Card != wantCard {
+		t.Fatalf("source card = %#v, want %#v", src.Card, wantCard)
+	}
+	for _, check := range []struct {
+		name   string
+		values []model.ContactValue
+		value  string
+		label  string
+	}{
+		{"url", src.URLAddresses, "https://example.com/ada", "homepage"},
+		{"social", src.SocialProfiles, "ada", "mastodon"},
+		{"messaging", src.InstantMessages, "+15550100", "signal"},
+		{"date", src.Dates, "2015-07-08", "anniversary"},
+		{"relation", src.Relations, "Grace Example", "spouse"},
+	} {
+		if len(check.values) != 1 || check.values[0].Value != check.value || check.values[0].Label != check.label {
+			t.Fatalf("%s values = %#v", check.name, check.values)
+		}
+	}
 	if src.Avatar == nil || string(src.Avatar.Data) != "avatar" {
 		t.Fatalf("source avatar = %#v", src.Avatar)
+	}
+}
+
+func TestReadAddressBookKeepsNameOnlyCardsAndYearlessBirthdays(t *testing.T) {
+	dir := t.TempDir()
+	yearless := time.Date(yearlessDateYear, 3, 2, 12, 0, 0, 0, time.UTC)
+	createAddressBookFixture(t, filepath.Join(dir, addressBookDBName), []fixtureContact{
+		{PK: 1, Identifier: "name-only:ABPerson", FirstName: "Grace", LastName: "Example", Birthday: &yearless},
+		{PK: 2, Identifier: "org-only:ABPerson", Organisation: "Synthetic Industries"},
+	})
+
+	contacts, err := readAddressBookDir(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contacts) != 2 {
+		t.Fatalf("contacts = %#v", contacts)
+	}
+	if contacts[0].Birthday != "--03-02" {
+		t.Fatalf("yearless birthday = %q", contacts[0].Birthday)
+	}
+	if contacts[1].Name() != "Synthetic Industries" || contacts[1].OrganizationName != "Synthetic Industries" {
+		t.Fatalf("organisation card = %#v", contacts[1])
+	}
+}
+
+func TestReadAddressBookWithoutOptionalCardTables(t *testing.T) {
+	path := filepath.Join(t.TempDir(), addressBookDBName)
+	createAddressBookFixture(t, path, []fixtureContact{{
+		PK: 1, Identifier: "sparse:ABPerson", FirstName: "Ada", LastName: "Example", Nickname: "Ace",
+	}})
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"ZABCDNOTE", "ZABCDURLADDRESS", "ZABCDSOCIALPROFILE", "ZABCDMESSAGINGADDRESS", "ZABCDDATE", "ZABCDRELATEDNAME"} {
+		if _, err := db.Exec("drop table " + table); err != nil {
+			_ = db.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	contacts, err := readAddressBookDatabase(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contacts) != 1 || contacts[0].Nickname != "Ace" {
+		t.Fatalf("contacts = %#v", contacts)
+	}
+	if len(contacts[0].URLAddresses) != 0 || contacts[0].Note != "" {
+		t.Fatalf("optional values = %#v", contacts[0])
 	}
 }
 
@@ -225,16 +335,47 @@ func TestReadAddressBookDatabaseDoesNotCreateLiveSidecars(t *testing.T) {
 }
 
 type fixtureContact struct {
-	PK           int
-	Identifier   string
-	FirstName    string
-	MiddleName   string
-	LastName     string
-	Organisation string
-	Emails       []string
-	Phones       []string
-	Address      fixtureAddress
-	Avatar       []byte
+	PK            int
+	Identifier    string
+	FirstName     string
+	MiddleName    string
+	LastName      string
+	MaidenName    string
+	Prefix        string
+	Suffix        string
+	Nickname      string
+	PhoneticFirst string
+	PhoneticLast  string
+	Organisation  string
+	Department    string
+	JobTitle      string
+	Birthday      *time.Time
+	Note          string
+	Emails        []string
+	Phones        []string
+	Address       fixtureAddress
+	URLs          []string
+	Social        []fixtureService
+	Messaging     []fixtureService
+	Dates         []fixtureDate
+	Related       []fixtureService
+	Avatar        []byte
+}
+
+type fixtureService struct {
+	Service string
+	Value   string
+}
+
+type fixtureDate struct {
+	Label string
+	When  time.Time
+}
+
+// appleTimestamp is the Core Data form the address book stores: seconds from
+// 2001-01-01 UTC.
+func appleTimestamp(when time.Time) float64 {
+	return float64(when.UTC().Unix() - appleEpochOffset)
 }
 
 type fixtureAddress struct {
@@ -266,10 +407,63 @@ func createAddressBookFixture(t *testing.T, path string, contacts []fixtureConta
 			ZFIRSTNAME varchar,
 			ZMIDDLENAME varchar,
 			ZLASTNAME varchar,
+			ZMAIDENNAME varchar,
+			ZTITLE varchar,
+			ZSUFFIX varchar,
+			ZNICKNAME varchar,
+			ZPHONETICFIRSTNAME varchar,
+			ZPHONETICLASTNAME varchar,
 			ZORGANIZATION varchar,
+			ZDEPARTMENT varchar,
+			ZJOBTITLE varchar,
+			ZBIRTHDAY timestamp,
 			ZUNIQUEID varchar,
 			ZEXTERNALUUID varchar,
 			ZTHUMBNAILIMAGEDATA blob
+		)`,
+		`create table ZABCDNOTE (
+			Z_PK integer primary key,
+			ZCONTACT integer,
+			ZTEXT varchar
+		)`,
+		`create table ZABCDURLADDRESS (
+			Z_PK integer primary key,
+			ZOWNER integer,
+			ZURL varchar,
+			ZLABEL varchar,
+			ZISPRIMARY integer,
+			ZORDERINGINDEX integer
+		)`,
+		`create table ZABCDSOCIALPROFILE (
+			Z_PK integer primary key,
+			ZOWNER integer,
+			ZSERVICENAME varchar,
+			ZUSERNAME varchar,
+			ZURL varchar,
+			ZLABEL varchar,
+			ZORDERINGINDEX integer
+		)`,
+		`create table ZABCDMESSAGINGADDRESS (
+			Z_PK integer primary key,
+			ZOWNER integer,
+			ZSERVICENAME varchar,
+			ZADDRESS varchar,
+			ZLABEL varchar,
+			ZORDERINGINDEX integer
+		)`,
+		`create table ZABCDDATE (
+			Z_PK integer primary key,
+			ZOWNER integer,
+			ZDATE timestamp,
+			ZLABEL varchar,
+			ZORDERINGINDEX integer
+		)`,
+		`create table ZABCDRELATEDNAME (
+			Z_PK integer primary key,
+			ZOWNER integer,
+			ZNAME varchar,
+			ZLABEL varchar,
+			ZORDERINGINDEX integer
 		)`,
 		`create table ZABCDPHONENUMBER (
 			Z_PK integer primary key,
@@ -310,9 +504,50 @@ func createAddressBookFixture(t *testing.T, path string, contacts []fixtureConta
 		}
 	}
 	for _, contact := range contacts {
-		if _, err := db.Exec(`insert into ZABCDRECORD (Z_PK, Z_ENT, ZFIRSTNAME, ZMIDDLENAME, ZLASTNAME, ZORGANIZATION, ZUNIQUEID, ZTHUMBNAILIMAGEDATA) values (?, 22, ?, ?, ?, ?, ?, ?)`,
-			contact.PK, contact.FirstName, contact.MiddleName, contact.LastName, contact.Organisation, contact.Identifier, contact.Avatar); err != nil {
+		var birthday any
+		if contact.Birthday != nil {
+			birthday = appleTimestamp(*contact.Birthday)
+		}
+		if _, err := db.Exec(`insert into ZABCDRECORD (Z_PK, Z_ENT, ZFIRSTNAME, ZMIDDLENAME, ZLASTNAME, ZMAIDENNAME, ZTITLE, ZSUFFIX, ZNICKNAME, ZPHONETICFIRSTNAME, ZPHONETICLASTNAME, ZORGANIZATION, ZDEPARTMENT, ZJOBTITLE, ZBIRTHDAY, ZUNIQUEID, ZTHUMBNAILIMAGEDATA) values (?, 22, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			contact.PK, contact.FirstName, contact.MiddleName, contact.LastName, contact.MaidenName, contact.Prefix, contact.Suffix,
+			contact.Nickname, contact.PhoneticFirst, contact.PhoneticLast, contact.Organisation, contact.Department, contact.JobTitle,
+			birthday, contact.Identifier, contact.Avatar); err != nil {
 			t.Fatal(err)
+		}
+		if contact.Note != "" {
+			if _, err := db.Exec(`insert into ZABCDNOTE (ZCONTACT, ZTEXT) values (?, ?)`, contact.PK, contact.Note); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for i, url := range contact.URLs {
+			if _, err := db.Exec(`insert into ZABCDURLADDRESS (ZOWNER, ZURL, ZLABEL, ZISPRIMARY, ZORDERINGINDEX) values (?, ?, '_$!<HomePage>!$_', ?, ?)`,
+				contact.PK, url, boolInt(i == 0), i); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for i, profile := range contact.Social {
+			if _, err := db.Exec(`insert into ZABCDSOCIALPROFILE (ZOWNER, ZSERVICENAME, ZUSERNAME, ZURL, ZORDERINGINDEX) values (?, ?, ?, ?, ?)`,
+				contact.PK, profile.Service, profile.Value, "https://example.com/"+profile.Value, i); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for i, handle := range contact.Messaging {
+			if _, err := db.Exec(`insert into ZABCDMESSAGINGADDRESS (ZOWNER, ZSERVICENAME, ZADDRESS, ZORDERINGINDEX) values (?, ?, ?, ?)`,
+				contact.PK, handle.Service, handle.Value, i); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for i, date := range contact.Dates {
+			if _, err := db.Exec(`insert into ZABCDDATE (ZOWNER, ZDATE, ZLABEL, ZORDERINGINDEX) values (?, ?, ?, ?)`,
+				contact.PK, appleTimestamp(date.When), date.Label, i); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for i, related := range contact.Related {
+			if _, err := db.Exec(`insert into ZABCDRELATEDNAME (ZOWNER, ZNAME, ZLABEL, ZORDERINGINDEX) values (?, ?, ?, ?)`,
+				contact.PK, related.Value, related.Service, i); err != nil {
+				t.Fatal(err)
+			}
 		}
 		for i, email := range contact.Emails {
 			if _, err := db.Exec(`insert into ZABCDEMAILADDRESS (ZOWNER, ZADDRESS, ZLABEL, ZISPRIMARY, ZORDERINGINDEX) values (?, ?, '_$!<Home>!$_', ?, ?)`,

@@ -12,7 +12,7 @@ import (
 func TestDecodeJSONArrayAndNDJSON(t *testing.T) {
 	for _, input := range []string{
 		`[{"identifier":"a1","full_name":"Ada Lovelace","emails":["ada@example.com"],"phones":["+1 555 0100"]}]`,
-		"{\"identifier\":\"a1\",\"first_name\":\"Ada\",\"last_name\":\"Lovelace\",\"emails\":[\"ada@example.com\"]}\n",
+		"{\"identifier\":\"a1\",\"given_name\":\"Ada\",\"family_name\":\"Lovelace\",\"emails\":[\"ada@example.com\"]}\n",
 	} {
 		contacts, err := Decode(strings.NewReader(input))
 		if err != nil {
@@ -50,7 +50,7 @@ func TestReadFileAndToSourceContacts(t *testing.T) {
 	}
 }
 
-func TestPostalAddressAcceptsStringAndNormalizesLabel(t *testing.T) {
+func TestLabeledValueAcceptsStringAndKeepsCustomLabels(t *testing.T) {
 	contacts, err := Decode(strings.NewReader(`[{"identifier":"a1","full_name":"Ada","emails":["ada@example.com"],"addresses":["  221B Baker Street  "]},{"identifier":"a2","full_name":"Grace","phones":["+1"],"addresses":[{"value":"1 Main Street","label":"office"}]}]`))
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestPostalAddressAcceptsStringAndNormalizesLabel(t *testing.T) {
 		t.Fatalf("ada addresses = %#v", ada.Addresses)
 	}
 	grace := contacts[1].SourceContact(false)
-	if len(grace.Addresses) != 1 || grace.Addresses[0].Label != "other" {
+	if len(grace.Addresses) != 1 || grace.Addresses[0].Label != "office" {
 		t.Fatalf("grace addresses = %#v", grace.Addresses)
 	}
 }

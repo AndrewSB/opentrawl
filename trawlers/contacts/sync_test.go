@@ -36,7 +36,7 @@ func TestSyncAutomaticallyCreatesAndReusesApplePeopleArchive(t *testing.T) {
 	defer func() { _ = store.Close() }()
 	app := New()
 	app.readApple = func(context.Context) ([]apple.Contact, error) {
-		return []apple.Contact{{Identifier: "apple-1", FullName: "Ada Example", Emails: []string{"ada@example.com"}, Phones: []string{"+15550100"}}}, nil
+		return []apple.Contact{{Identifier: "apple-1", FullName: "Ada Example", Emails: []apple.LabeledValue{{Value: "ada@example.com"}}, Phones: []apple.LabeledValue{{Value: "+15550100"}}}}, nil
 	}
 	req := &trawlkit.Request{Store: store, Paths: trawlkit.Paths{Archive: path}}
 	first, err := app.Sync(ctx, req)

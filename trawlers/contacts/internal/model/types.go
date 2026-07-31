@@ -9,6 +9,30 @@ type ContactValue struct {
 	Primary bool   `json:"primary,omitempty" yaml:"primary,omitempty"`
 }
 
+// Card holds the single-valued parts of a contact card. The field names follow
+// the vCard vocabulary that Apple Contacts, Google Contacts and CardDAV all
+// share, so a value keeps its meaning instead of being flattened into a
+// display name. Birthday is text because address books record year-less
+// birthdays as --MM-DD.
+type Card struct {
+	GivenName                string `json:"given_name,omitempty" yaml:"given_name,omitempty"`
+	MiddleName               string `json:"middle_name,omitempty" yaml:"middle_name,omitempty"`
+	FamilyName               string `json:"family_name,omitempty" yaml:"family_name,omitempty"`
+	PreviousFamilyName       string `json:"previous_family_name,omitempty" yaml:"previous_family_name,omitempty"`
+	NamePrefix               string `json:"name_prefix,omitempty" yaml:"name_prefix,omitempty"`
+	NameSuffix               string `json:"name_suffix,omitempty" yaml:"name_suffix,omitempty"`
+	Nickname                 string `json:"nickname,omitempty" yaml:"nickname,omitempty"`
+	PhoneticGivenName        string `json:"phonetic_given_name,omitempty" yaml:"phonetic_given_name,omitempty"`
+	PhoneticMiddleName       string `json:"phonetic_middle_name,omitempty" yaml:"phonetic_middle_name,omitempty"`
+	PhoneticFamilyName       string `json:"phonetic_family_name,omitempty" yaml:"phonetic_family_name,omitempty"`
+	PhoneticOrganizationName string `json:"phonetic_organization_name,omitempty" yaml:"phonetic_organization_name,omitempty"`
+	OrganizationName         string `json:"organization_name,omitempty" yaml:"organization_name,omitempty"`
+	DepartmentName           string `json:"department_name,omitempty" yaml:"department_name,omitempty"`
+	JobTitle                 string `json:"job_title,omitempty" yaml:"job_title,omitempty"`
+	Birthday                 string `json:"birthday,omitempty" yaml:"birthday,omitempty"`
+	Note                     string `json:"note,omitempty" yaml:"note,omitempty"`
+}
+
 type ExternalRef struct {
 	ID         string    `json:"id,omitempty" yaml:"id,omitempty"`
 	Resource   string    `json:"resource,omitempty" yaml:"resource,omitempty"`
@@ -37,14 +61,20 @@ type PersonSource struct {
 }
 
 type Person struct {
-	ID                 string                    `json:"id" yaml:"id"`
-	Name               string                    `json:"name" yaml:"name"`
-	SortName           string                    `json:"sort_name,omitempty" yaml:"sort_name,omitempty"`
+	ID                 string `json:"id" yaml:"id"`
+	Name               string `json:"name" yaml:"name"`
+	SortName           string `json:"sort_name,omitempty" yaml:"sort_name,omitempty"`
+	Card               `yaml:",inline"`
 	AKA                []string                  `json:"aka,omitempty" yaml:"aka,omitempty"`
 	Tags               []string                  `json:"tags,omitempty" yaml:"tags,omitempty"`
 	Emails             []ContactValue            `json:"emails,omitempty" yaml:"emails,omitempty"`
 	Phones             []ContactValue            `json:"phones,omitempty" yaml:"phones,omitempty"`
 	Addresses          []ContactValue            `json:"addresses,omitempty" yaml:"addresses,omitempty"`
+	URLAddresses       []ContactValue            `json:"url_addresses,omitempty" yaml:"url_addresses,omitempty"`
+	SocialProfiles     []ContactValue            `json:"social_profiles,omitempty" yaml:"social_profiles,omitempty"`
+	InstantMessages    []ContactValue            `json:"instant_message_addresses,omitempty" yaml:"instant_message_addresses,omitempty"`
+	Dates              []ContactValue            `json:"dates,omitempty" yaml:"dates,omitempty"`
+	ContactRelations   []ContactValue            `json:"contact_relations,omitempty" yaml:"contact_relations,omitempty"`
 	Avatar             AvatarRef                 `json:"avatar,omitzero" yaml:"avatar,omitempty"`
 	Accounts           map[string][]string       `json:"accounts,omitempty" yaml:"accounts,omitempty"`
 	Sources            map[string]PersonSource   `json:"sources,omitempty" yaml:"sources,omitempty"`

@@ -24,9 +24,20 @@ import (
 func TestOpenRecordProjection(t *testing.T) {
 	input := model.Person{
 		ID: "person_storage_fixture", Name: "Avery Example", SortName: "Example, Avery", AKA: []string{"Avery E."}, Tags: []string{"project"},
+		Card: model.Card{
+			GivenName: "Avery", FamilyName: "Example", PreviousFamilyName: "Stone", NamePrefix: "Dr", NameSuffix: "Jr",
+			Nickname: "Ave", PhoneticGivenName: "AY-vree", PhoneticFamilyName: "eg-ZAM-pl",
+			OrganizationName: "Example Industries", DepartmentName: "Research", JobTitle: "Engineer",
+			Birthday: "--04-01", Note: "Prefers written updates.",
+		},
 		Emails: []model.ContactValue{{Value: "avery@example.com", Label: "work", Source: "provider-private", Primary: true}},
 		Phones: []model.ContactValue{{Value: "+15550001111", Label: "mobile"}}, Addresses: []model.ContactValue{{Value: "1 Example Street", Label: "work"}},
-		Accounts: map[string][]string{"telegram": {"avery_example"}}, Annotation: "Synthetic collaborator.", AnnotationStatedAt: "2026-07-10",
+		URLAddresses:     []model.ContactValue{{Value: "https://example.com/avery", Label: "homepage"}},
+		SocialProfiles:   []model.ContactValue{{Value: "avery_example", Label: "mastodon"}},
+		InstantMessages:  []model.ContactValue{{Value: "+15550001111", Label: "signal"}},
+		Dates:            []model.ContactValue{{Value: "2015-07-08", Label: "anniversary"}},
+		ContactRelations: []model.ContactValue{{Value: "Robin Example", Label: "spouse"}},
+		Accounts:         map[string][]string{"telegram": {"avery_example"}}, Annotation: "Synthetic collaborator.", AnnotationStatedAt: "2026-07-10",
 		Apple: model.ExternalRef{ID: "apple-private"}, Google: model.ExternalRef{ID: "google-private"}, Avatar: model.AvatarRef{SHA256: "private-hash"}, Path: "/private/archive", CreatedAt: time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC), Extra: map[string]map[string]any{"private": {"token": "hidden"}},
 	}
 	inputJSON, err := json.Marshal(input)
@@ -64,9 +75,9 @@ func TestOpenRecordProjection(t *testing.T) {
 	if strings.Contains(string(data), `"id":`) {
 		t.Fatalf("storage ID field leaked: %s", data)
 	}
-	assertExactRecord(t, record, &contactsopenv1.ContactsRecord{}, `{"ref":"contacts:person/person_storage_fixture","name":"Avery Example","sort_name":"Example, Avery","aka":["Avery E."],"tags":["project"],"emails":[{"value":"avery@example.com","label":"work","primary":true}],"phones":[{"value":"+15550001111","label":"mobile"}],"addresses":[{"value":"1 Example Street","label":"work"}],"accounts":{"telegram":{"values":["avery_example"]}},"annotation":"Synthetic collaborator.","annotation_stated_at":"2026-07-10"}`)
+	assertExactRecord(t, record, &contactsopenv1.ContactsRecord{}, `{"ref":"contacts:person/person_storage_fixture","name":"Avery Example","sort_name":"Example, Avery","aka":["Avery E."],"tags":["project"],"emails":[{"value":"avery@example.com","label":"work","primary":true}],"phones":[{"value":"+15550001111","label":"mobile"}],"addresses":[{"value":"1 Example Street","label":"work"}],"accounts":{"telegram":{"values":["avery_example"]}},"annotation":"Synthetic collaborator.","annotation_stated_at":"2026-07-10","given_name":"Avery","family_name":"Example","previous_family_name":"Stone","name_prefix":"Dr","name_suffix":"Jr","nickname":"Ave","phonetic_given_name":"AY-vree","phonetic_family_name":"eg-ZAM-pl","organization_name":"Example Industries","department_name":"Research","job_title":"Engineer","birthday":"--04-01","note":"Prefers written updates.","url_addresses":[{"value":"https://example.com/avery","label":"homepage"}],"social_profiles":[{"value":"avery_example","label":"mastodon"}],"instant_message_addresses":[{"value":"+15550001111","label":"signal"}],"dates":[{"value":"2015-07-08","label":"anniversary"}],"contact_relations":[{"value":"Robin Example","label":"spouse"}]}`)
 	presentation := projectOpenPresentation(value)
-	if presentation.Title != "Avery Example" || presentation.PrimaryAnchorId != "name" || len(presentation.Blocks) != 2 || len(presentation.Blocks[1].GetFields().Fields) != 9 {
+	if presentation.Title != "Avery Example" || presentation.PrimaryAnchorId != "name" || len(presentation.Blocks) != 2 || len(presentation.Blocks[1].GetFields().Fields) != 22 {
 		t.Fatalf("presentation = %s", prototext.Format(presentation))
 	}
 	type evidenceContactValue struct {
@@ -82,22 +93,32 @@ func TestOpenRecordProjection(t *testing.T) {
 		return result
 	}
 	evidenceInput := struct {
-		Ref                string                 `json:"ref"`
-		Name               string                 `json:"name"`
-		SortName           string                 `json:"sort_name"`
+		Ref      string `json:"ref"`
+		Name     string `json:"name"`
+		SortName string `json:"sort_name"`
+		model.Card
 		AKA                []string               `json:"aka"`
 		Tags               []string               `json:"tags"`
 		Emails             []evidenceContactValue `json:"emails"`
 		Phones             []evidenceContactValue `json:"phones"`
 		Addresses          []evidenceContactValue `json:"addresses"`
+		URLAddresses       []evidenceContactValue `json:"url_addresses"`
+		SocialProfiles     []evidenceContactValue `json:"social_profiles"`
+		InstantMessages    []evidenceContactValue `json:"instant_message_addresses"`
+		Dates              []evidenceContactValue `json:"dates"`
+		ContactRelations   []evidenceContactValue `json:"contact_relations"`
 		Accounts           map[string][]string    `json:"accounts"`
 		Annotation         string                 `json:"annotation"`
 		AnnotationStatedAt string                 `json:"annotation_stated_at"`
-	}{archive.PersonRef(input.ID), input.Name, input.SortName, input.AKA, input.Tags, projectedValues(input.Emails), projectedValues(input.Phones), projectedValues(input.Addresses), input.Accounts, input.Annotation, input.AnnotationStatedAt}
+	}{archive.PersonRef(input.ID), input.Name, input.SortName, input.Card, input.AKA, input.Tags,
+		projectedValues(input.Emails), projectedValues(input.Phones), projectedValues(input.Addresses),
+		projectedValues(input.URLAddresses), projectedValues(input.SocialProfiles), projectedValues(input.InstantMessages),
+		projectedValues(input.Dates), projectedValues(input.ContactRelations),
+		input.Accounts, input.Annotation, input.AnnotationStatedAt}
 	assertOpenPresentation(t, "contacts", evidenceInput, record, presentation)
 	assertExactPresentation(t, presentation, `title: "Avery Example"
 blocks: { heading: { text: "Avery Example" } anchor_id: "name" }
-blocks: { fields: { fields: { label: "Sort name" display: "Example, Avery" anchor_id: "sort_name" } fields: { label: "Identifier" display: "person_storage_fixture" anchor_id: "identifier" } fields: { label: "Also known as" display: "Avery E." anchor_id: "aka" } fields: { label: "Tags" display: "project" anchor_id: "tag" } fields: { label: "Emails" display: "avery@example.com (work) [primary]" anchor_id: "email" } fields: { label: "Phones" display: "+15550001111 (mobile)" anchor_id: "phone" } fields: { label: "Addresses" display: "1 Example Street (work)" anchor_id: "address" } fields: { label: "Accounts" display: "telegram: avery_example" anchor_id: "account" } fields: { label: "Annotation" display: "Synthetic collaborator." anchor_id: "annotation" } } }
+blocks: { fields: { fields: { label: "Sort name" display: "Example, Avery" anchor_id: "sort_name" } fields: { label: "Identifier" display: "person_storage_fixture" anchor_id: "identifier" } fields: { label: "Nickname" display: "Ave" anchor_id: "nickname" } fields: { label: "Also known as" display: "Avery E." anchor_id: "aka" } fields: { label: "Maiden name" display: "Stone" anchor_id: "previous_family_name" } fields: { label: "Phonetic name" display: "AY-vree eg-ZAM-pl" anchor_id: "phonetic_name" } fields: { label: "Job title" display: "Engineer" anchor_id: "job_title" } fields: { label: "Department" display: "Research" anchor_id: "department_name" } fields: { label: "Organization" display: "Example Industries" anchor_id: "organization_name" } fields: { label: "Birthday" display: "--04-01" anchor_id: "birthday" } fields: { label: "Tags" display: "project" anchor_id: "tag" } fields: { label: "Emails" display: "avery@example.com (work) [primary]" anchor_id: "email" } fields: { label: "Phones" display: "+15550001111 (mobile)" anchor_id: "phone" } fields: { label: "Addresses" display: "1 Example Street (work)" anchor_id: "address" } fields: { label: "Websites" display: "https://example.com/avery (homepage)" anchor_id: "url_address" } fields: { label: "Social profiles" display: "avery_example (mastodon)" anchor_id: "social_profile" } fields: { label: "Instant messages" display: "+15550001111 (signal)" anchor_id: "instant_message_address" } fields: { label: "Dates" display: "2015-07-08 (anniversary)" anchor_id: "date" } fields: { label: "Related names" display: "Robin Example (spouse)" anchor_id: "contact_relation" } fields: { label: "Accounts" display: "telegram: avery_example" anchor_id: "account" } fields: { label: "Note" display: "Prefers written updates." anchor_id: "note" } fields: { label: "Annotation" display: "Synthetic collaborator." anchor_id: "annotation" } } }
 primary_anchor_id: "name"`)
 	t.Run("blank_title_uses_source_fallback", func(t *testing.T) {
 		blank := input

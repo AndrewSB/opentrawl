@@ -81,6 +81,7 @@ func indexNames(person model.Person) []string {
 func indexAliases(person model.Person) []string {
 	values := append([]string{}, person.AKA...)
 	values = append(values, person.Tags...)
+	values = append(values, person.SearchNames()...)
 	for _, source := range person.Sources {
 		values = append(values, source.Names...)
 	}
@@ -103,6 +104,42 @@ func appendMissingStrings(existing []string, incoming []string) []string {
 	}
 	sort.Strings(existing)
 	return existing
+}
+
+// appendMissingLabeledValues keeps values that only their label tells apart:
+// one handle on two services, or one date under two labels, are two facts
+// rather than a duplicate.
+func appendMissingLabeledValues(existing []model.ContactValue, incoming []model.ContactValue, source string, normalize func(string) string) []model.ContactValue {
+	for _, value := range incoming {
+		key := labeledValueKey(value, normalize)
+		if key == "" {
+			continue
+		}
+		found := false
+		for _, current := range existing {
+			if labeledValueKey(current, normalize) == key {
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		value.Source = source
+		if value.Label == "" {
+			value.Label = "other"
+		}
+		existing = append(existing, value)
+	}
+	return existing
+}
+
+func labeledValueKey(value model.ContactValue, normalize func(string) string) string {
+	key := normalize(value.Value)
+	if key == "" {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(value.Label)) + "\x00" + key
 }
 
 func appendMissingValues(existing []model.ContactValue, incoming []model.ContactValue, source string, normalize func(string) string) []model.ContactValue {

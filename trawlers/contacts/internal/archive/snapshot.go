@@ -550,9 +550,13 @@ func (s *Store) rebuildPersonFromSourceSet(ctx context.Context, personID string,
 		oldManagedAccounts = mergeAccounts(oldManagedAccounts, snapshot.Accounts)
 		delete(person.Sources, source)
 	}
-	person.Emails = removeManagedValues(person.Emails, managed)
-	person.Phones = removeManagedValues(person.Phones, managed)
-	person.Addresses = removeManagedValues(person.Addresses, managed)
+	for _, values := range personValueKinds(&person) {
+		*values = removeManagedValues(*values, managed)
+	}
+	// The card is owned entirely by the sources on the person, so it is rebuilt
+	// from them rather than subtracted: a field a source stops stating stops
+	// being reported.
+	person.Card = model.Card{}
 	person.Tags = subtractStrings(person.Tags, oldManagedTags)
 	person.Accounts = subtractAccounts(person.Accounts, oldManagedAccounts)
 	previousAvatar := person.Avatar
@@ -575,10 +579,9 @@ func (s *Store) rebuildPersonFromSourceSet(ctx context.Context, personID string,
 			person.Avatar = previousAvatar
 		}
 		newNames = append(newNames, contact.Name)
+		person.Card = person.Fill(contact.Card)
 		person.Tags = appendMissingStrings(person.Tags, contact.Tags)
-		person.Emails = appendMissingValues(person.Emails, contact.Emails, row.Source, model.NormalizeEmail)
-		person.Phones = appendMissingValues(person.Phones, contact.Phones, row.Source, model.NormalizePhone)
-		person.Addresses = appendMissingValues(person.Addresses, contact.Addresses, row.Source, model.NormalizeAddress)
+		appendSourceCardValues(&person, contact, row.Source)
 		person.Accounts = mergeAccounts(person.Accounts, contact.Accounts)
 		person.Sources = mergePersonSource(person.Sources, row)
 		setExternal(&person, row.Source, contact, row.SyncedAt)
@@ -605,10 +608,16 @@ func cleanSourceContact(source string, contact model.SourceContact) model.Source
 	contact.Source = source
 	contact.ExternalID = strings.TrimSpace(contact.ExternalID)
 	contact.Name = strings.Join(strings.Fields(contact.Name), " ")
+	contact.Card = contact.Clean()
 	contact.Tags = cleanStrings(contact.Tags)
 	contact.Emails = sourceValues(contact.Emails, source, model.NormalizeEmail)
 	contact.Phones = sourceValues(contact.Phones, source, model.NormalizePhone)
 	contact.Addresses = sourceValues(contact.Addresses, source, model.NormalizeAddress)
+	contact.URLAddresses = sourceValues(contact.URLAddresses, source, model.NormalizeURL)
+	contact.SocialProfiles = sourceLabeledValues(contact.SocialProfiles, source, model.NormalizeValue)
+	contact.InstantMessages = sourceLabeledValues(contact.InstantMessages, source, model.NormalizeValue)
+	contact.Dates = sourceLabeledValues(contact.Dates, source, model.NormalizeValue)
+	contact.Relations = sourceLabeledValues(contact.Relations, source, model.NormalizeValue)
 	contact.Accounts = cleanAccounts(contact.Accounts)
 	return contact
 }
@@ -643,14 +652,27 @@ func personFromSourceContact(contact model.SourceContact, now time.Time) model.P
 }
 
 func addSourceContactProjection(person model.Person, contact model.SourceContact, now time.Time) model.Person {
+	person.Card = person.Fill(contact.Card)
 	person.Tags = appendMissingStrings(person.Tags, contact.Tags)
-	person.Emails = appendMissingValues(person.Emails, contact.Emails, contact.Source, model.NormalizeEmail)
-	person.Phones = appendMissingValues(person.Phones, contact.Phones, contact.Source, model.NormalizePhone)
-	person.Addresses = appendMissingValues(person.Addresses, contact.Addresses, contact.Source, model.NormalizeAddress)
+	appendSourceCardValues(&person, contact, contact.Source)
 	person.Accounts = mergeAccounts(person.Accounts, contact.Accounts)
 	setExternal(&person, contact.Source, contact, now)
 	setImportedAvatar(&person, contact.Avatar, contact.Source, now)
 	return person
+}
+
+// appendSourceCardValues projects one source contact's repeated fields onto the
+// Person. Each kind keeps its own dedupe rule so that a phone number and a
+// social handle are not compared the same way.
+func appendSourceCardValues(person *model.Person, contact model.SourceContact, source string) {
+	person.Emails = appendMissingValues(person.Emails, contact.Emails, source, model.NormalizeEmail)
+	person.Phones = appendMissingValues(person.Phones, contact.Phones, source, model.NormalizePhone)
+	person.Addresses = appendMissingValues(person.Addresses, contact.Addresses, source, model.NormalizeAddress)
+	person.URLAddresses = appendMissingValues(person.URLAddresses, contact.URLAddresses, source, model.NormalizeURL)
+	person.SocialProfiles = appendMissingLabeledValues(person.SocialProfiles, contact.SocialProfiles, source, model.NormalizeValue)
+	person.InstantMessages = appendMissingLabeledValues(person.InstantMessages, contact.InstantMessages, source, model.NormalizeValue)
+	person.Dates = appendMissingLabeledValues(person.Dates, contact.Dates, source, model.NormalizeValue)
+	person.ContactRelations = appendMissingLabeledValues(person.ContactRelations, contact.Relations, source, model.NormalizeValue)
 }
 
 func mergePersonSource(sources map[string]model.PersonSource, row sourceContactRow) map[string]model.PersonSource {

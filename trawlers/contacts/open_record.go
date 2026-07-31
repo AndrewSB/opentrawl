@@ -43,25 +43,50 @@ func (a *App) OpenRecord(ctx context.Context, req *trawlkit.Request, ref string)
 func projectOpenRecord(value openValue) *contactsopenv1.ContactsRecord {
 	ref, person := value.ref, value.person
 	record := &contactsopenv1.ContactsRecord{
-		Ref:       ref,
-		Name:      person.Name,
-		Aka:       append([]string(nil), person.AKA...),
-		Tags:      append([]string(nil), person.Tags...),
-		Emails:    projectContactValues(person.Emails),
-		Phones:    projectContactValues(person.Phones),
-		Addresses: projectContactValues(person.Addresses),
-		Accounts:  make(map[string]*contactsopenv1.IdentifierList, len(person.Accounts)),
+		Ref:                     ref,
+		Name:                    person.Name,
+		Aka:                     append([]string(nil), person.AKA...),
+		Tags:                    append([]string(nil), person.Tags...),
+		Emails:                  projectContactValues(person.Emails),
+		Phones:                  projectContactValues(person.Phones),
+		Addresses:               projectContactValues(person.Addresses),
+		UrlAddresses:            projectContactValues(person.URLAddresses),
+		SocialProfiles:          projectContactValues(person.SocialProfiles),
+		InstantMessageAddresses: projectContactValues(person.InstantMessages),
+		Dates:                   projectContactValues(person.Dates),
+		ContactRelations:        projectContactValues(person.ContactRelations),
+		Accounts:                make(map[string]*contactsopenv1.IdentifierList, len(person.Accounts)),
 	}
 	if record.Ref == "" {
 		record.Ref = archive.PersonRef(person.ID)
 	}
 	setOptionalString(&record.SortName, person.SortName)
+	projectOpenCard(record, person.Card)
 	for name, identifiers := range person.Accounts {
 		record.Accounts[name] = &contactsopenv1.IdentifierList{Values: append([]string(nil), identifiers...)}
 	}
 	setOptionalString(&record.Annotation, person.Annotation)
 	setOptionalString(&record.AnnotationStatedAt, person.AnnotationStatedAt)
 	return record
+}
+
+func projectOpenCard(record *contactsopenv1.ContactsRecord, card model.Card) {
+	setOptionalString(&record.GivenName, card.GivenName)
+	setOptionalString(&record.MiddleName, card.MiddleName)
+	setOptionalString(&record.FamilyName, card.FamilyName)
+	setOptionalString(&record.PreviousFamilyName, card.PreviousFamilyName)
+	setOptionalString(&record.NamePrefix, card.NamePrefix)
+	setOptionalString(&record.NameSuffix, card.NameSuffix)
+	setOptionalString(&record.Nickname, card.Nickname)
+	setOptionalString(&record.PhoneticGivenName, card.PhoneticGivenName)
+	setOptionalString(&record.PhoneticMiddleName, card.PhoneticMiddleName)
+	setOptionalString(&record.PhoneticFamilyName, card.PhoneticFamilyName)
+	setOptionalString(&record.PhoneticOrganizationName, card.PhoneticOrganizationName)
+	setOptionalString(&record.OrganizationName, card.OrganizationName)
+	setOptionalString(&record.DepartmentName, card.DepartmentName)
+	setOptionalString(&record.JobTitle, card.JobTitle)
+	setOptionalString(&record.Birthday, card.Birthday)
+	setOptionalString(&record.Note, card.Note)
 }
 
 func projectContactValues(values []model.ContactValue) []*contactsopenv1.ContactValue {
@@ -91,16 +116,30 @@ func projectOpenPresentation(value openValue) *presentationv1.PresentationDocume
 	if title == "" {
 		title = "Contact"
 	}
+	card := value.person.Card
 	fields := make([]*presentationv1.Field, 0, 7)
 	appendPresentationFieldWithAnchor(&fields, "Sort name", value.person.SortName, "sort_name")
 	appendPresentationFieldWithAnchor(&fields, "Identifier", value.person.ID, "identifier")
+	appendPresentationFieldWithAnchor(&fields, "Nickname", card.Nickname, "nickname")
 	appendPresentationFieldWithAnchor(&fields, "Also known as", joinPresentationStrings(record.Aka), "aka")
+	appendPresentationFieldWithAnchor(&fields, "Maiden name", card.PreviousFamilyName, "previous_family_name")
+	appendPresentationFieldWithAnchor(&fields, "Phonetic name", joinPresentationName(card.PhoneticGivenName, card.PhoneticMiddleName, card.PhoneticFamilyName), "phonetic_name")
+	appendPresentationFieldWithAnchor(&fields, "Job title", card.JobTitle, "job_title")
+	appendPresentationFieldWithAnchor(&fields, "Department", card.DepartmentName, "department_name")
+	appendPresentationFieldWithAnchor(&fields, "Organization", card.OrganizationName, "organization_name")
+	appendPresentationFieldWithAnchor(&fields, "Birthday", card.Birthday, "birthday")
 	appendPresentationFieldWithAnchor(&fields, "Tags", joinPresentationStrings(record.Tags), "tag")
 	appendPresentationFieldWithAnchor(&fields, "Emails", formatPresentationContactValues(record.Emails), "email")
 	appendPresentationFieldWithAnchor(&fields, "Phones", formatPresentationContactValues(record.Phones), "phone")
 	appendPresentationFieldWithAnchor(&fields, "Addresses", formatPresentationContactValues(record.Addresses), "address")
+	appendPresentationFieldWithAnchor(&fields, "Websites", formatPresentationContactValues(record.UrlAddresses), "url_address")
+	appendPresentationFieldWithAnchor(&fields, "Social profiles", formatPresentationContactValues(record.SocialProfiles), "social_profile")
+	appendPresentationFieldWithAnchor(&fields, "Instant messages", formatPresentationContactValues(record.InstantMessageAddresses), "instant_message_address")
+	appendPresentationFieldWithAnchor(&fields, "Dates", formatPresentationContactValues(record.Dates), "date")
+	appendPresentationFieldWithAnchor(&fields, "Related names", formatPresentationContactValues(record.ContactRelations), "contact_relation")
 	appendPresentationFieldWithAnchor(&fields, "Accounts", formatPresentationAccounts(record.Accounts), "account")
 	appendPresentationFieldWithAnchor(&fields, "Source names", formatPresentationSourceNames(value.person.Sources), "source_name")
+	appendPresentationFieldWithAnchor(&fields, "Note", card.Note, "note")
 	appendPresentationFieldWithAnchor(&fields, "Annotation", record.GetAnnotation(), "annotation")
 	blocks := make([]*presentationv1.Block, 0, 3+len(value.notes))
 	blocks = append(blocks, &presentationv1.Block{AnchorId: "name", Content: &presentationv1.Block_Heading{Heading: &presentationv1.Heading{Text: title}}})
@@ -145,6 +184,17 @@ func appendPresentationFieldWithAnchor(fields *[]*presentationv1.Field, label, v
 	if value = strings.TrimSpace(value); value != "" {
 		*fields = append(*fields, &presentationv1.Field{Label: label, Display: value, AnchorId: anchorID})
 	}
+}
+
+// joinPresentationName reads the parts of one name as a name, not as a list.
+func joinPresentationName(values ...string) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			parts = append(parts, value)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func joinPresentationStrings(values []string) string {

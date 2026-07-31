@@ -156,6 +156,29 @@ func TestFreshSyncCreatesAnArchiveThatCanBeSearchedAndOpened(t *testing.T) {
 	if opened.GetRecord().GetPresentation().GetTitle() != "Ada Example" {
 		t.Fatalf("opened record after fresh sync = %#v", &opened)
 	}
+	// The source fixture states a nickname and a job title and has none of the
+	// optional card tables, so this also proves the card survives an address
+	// book that only carries part of it.
+	shown := map[string]string{}
+	for _, block := range opened.GetRecord().GetPresentation().GetBlocks() {
+		for _, field := range block.GetFields().GetFields() {
+			shown[field.GetLabel()] = field.GetDisplay()
+		}
+	}
+	if shown["Nickname"] != "Ace" || shown["Job title"] != "Mathematician" {
+		t.Fatalf("opened card fields = %#v", shown)
+	}
+
+	code, stdout, stderr = runContacts(t, home, "search", "Ace", "--json")
+	if code != 0 {
+		t.Fatalf("nickname search code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if err := json.Unmarshal([]byte(stdout), &search); err != nil {
+		t.Fatalf("nickname search JSON: %v\n%s", err, stdout)
+	}
+	if len(search.Results) != 1 || search.Results[0].Summary.Title != "Ada Example" {
+		t.Fatalf("nickname search = %#v", search.Results)
+	}
 }
 
 func TestRunnerCommandsAgainstSyntheticArchive(t *testing.T) {
@@ -446,11 +469,11 @@ func writeContactsSourceFixture(t *testing.T, path string) {
 	for _, statement := range []string{
 		`create table Z_PRIMARYKEY (Z_ENT integer, Z_NAME varchar, Z_SUPER integer)`,
 		`insert into Z_PRIMARYKEY (Z_ENT, Z_NAME, Z_SUPER) values (22, 'ABCDContact', 17)`,
-		`create table ZABCDRECORD (Z_PK integer primary key, Z_ENT integer, ZFIRSTNAME varchar, ZMIDDLENAME varchar, ZLASTNAME varchar, ZORGANIZATION varchar, ZUNIQUEID varchar, ZEXTERNALUUID varchar, ZTHUMBNAILIMAGEDATA blob)`,
+		`create table ZABCDRECORD (Z_PK integer primary key, Z_ENT integer, ZFIRSTNAME varchar, ZMIDDLENAME varchar, ZLASTNAME varchar, ZNICKNAME varchar, ZORGANIZATION varchar, ZJOBTITLE varchar, ZUNIQUEID varchar, ZEXTERNALUUID varchar, ZTHUMBNAILIMAGEDATA blob)`,
 		`create table ZABCDPHONENUMBER (Z_PK integer primary key, ZOWNER integer, Z22_OWNER integer, ZFULLNUMBER varchar, ZLABEL varchar, ZISPRIMARY integer, ZORDERINGINDEX integer)`,
 		`create table ZABCDEMAILADDRESS (Z_PK integer primary key, ZOWNER integer, Z22_OWNER integer, ZADDRESS varchar, ZLABEL varchar, ZISPRIMARY integer, ZORDERINGINDEX integer)`,
 		`create table ZABCDPOSTALADDRESS (Z_PK integer primary key, ZOWNER integer, Z22_OWNER integer, ZLABEL varchar, ZSTREET varchar, ZCITY varchar, ZSTATE varchar, ZZIPCODE varchar, ZCOUNTRYNAME varchar, ZCOUNTRYCODE varchar, ZISPRIMARY integer, ZORDERINGINDEX integer)`,
-		`insert into ZABCDRECORD (Z_PK, Z_ENT, ZFIRSTNAME, ZLASTNAME, ZUNIQUEID) values (1, 22, 'Ada', 'Example', 'synthetic-contact:ABPerson')`,
+		`insert into ZABCDRECORD (Z_PK, Z_ENT, ZFIRSTNAME, ZLASTNAME, ZNICKNAME, ZJOBTITLE, ZUNIQUEID) values (1, 22, 'Ada', 'Example', 'Ace', 'Mathematician', 'synthetic-contact:ABPerson')`,
 		`insert into ZABCDEMAILADDRESS (ZOWNER, ZADDRESS, ZLABEL, ZISPRIMARY, ZORDERINGINDEX) values (1, 'ada@example.com', '_$!<Work>!$_', 1, 0)`,
 	} {
 		if _, err := db.Exec(statement); err != nil {

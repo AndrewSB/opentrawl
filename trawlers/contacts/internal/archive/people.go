@@ -29,7 +29,7 @@ func (e personNotFoundError) Unwrap() error {
 
 func (s *Store) People(ctx context.Context) ([]model.Person, error) {
 	rows, err := s.database().QueryContext(ctx, `
-select id, name, sort_name, aka_json, tags_json, avatar_json, accounts_json,
+select id, name, sort_name, card_json, aka_json, tags_json, avatar_json, accounts_json,
        sources_json, apple_json, google_json, body, annotation,
        annotation_stated_at, created_at, updated_at
 from people
@@ -65,7 +65,7 @@ order by lower(name), id`)
 
 func (s *Store) Person(ctx context.Context, id string) (model.Person, error) {
 	row := s.database().QueryRowContext(ctx, `
-select id, name, sort_name, aka_json, tags_json, avatar_json, accounts_json,
+select id, name, sort_name, card_json, aka_json, tags_json, avatar_json, accounts_json,
        sources_json, apple_json, google_json, body, annotation,
        annotation_stated_at, created_at, updated_at
 from people
@@ -164,11 +164,14 @@ func (s *Store) savePerson(ctx context.Context, person model.Person) error {
 
 func scanPerson(row interface{ Scan(dest ...any) error }) (model.Person, error) {
 	var person model.Person
-	var akaJSON, tagsJSON, avatarJSON, accountsJSON, sourcesJSON, appleJSON, googleJSON string
+	var cardJSON, akaJSON, tagsJSON, avatarJSON, accountsJSON, sourcesJSON, appleJSON, googleJSON string
 	var createdAt, updatedAt string
-	if err := row.Scan(&person.ID, &person.Name, &person.SortName, &akaJSON, &tagsJSON, &avatarJSON,
+	if err := row.Scan(&person.ID, &person.Name, &person.SortName, &cardJSON, &akaJSON, &tagsJSON, &avatarJSON,
 		&accountsJSON, &sourcesJSON, &appleJSON, &googleJSON, &person.Body, &person.Annotation,
 		&person.AnnotationStatedAt, &createdAt, &updatedAt); err != nil {
+		return model.Person{}, err
+	}
+	if err := decodeJSON(cardJSON, &person.Card); err != nil {
 		return model.Person{}, err
 	}
 	if err := decodeJSONList(akaJSON, &person.AKA); err != nil {
@@ -207,6 +210,7 @@ order by kind, position`, person.ID)
 		return err
 	}
 	defer func() { _ = rows.Close() }()
+	kinds := personValueKinds(person)
 	for rows.Next() {
 		var kind string
 		var value model.ContactValue
@@ -215,16 +219,27 @@ order by kind, position`, person.ID)
 			return err
 		}
 		value.Primary = primary != 0
-		switch kind {
-		case "email":
-			person.Emails = append(person.Emails, value)
-		case "phone":
-			person.Phones = append(person.Phones, value)
-		case "address":
-			person.Addresses = append(person.Addresses, value)
+		if target := kinds[kind]; target != nil {
+			*target = append(*target, value)
 		}
 	}
 	return rows.Err()
+}
+
+// personValueKinds is the one place that maps a stored contact value kind to
+// the Person field holding it. Reads, writes and cleaning all go through it, so
+// a new kind cannot be added to storage without being read back.
+func personValueKinds(person *model.Person) map[string]*[]model.ContactValue {
+	return map[string]*[]model.ContactValue{
+		"email":                  &person.Emails,
+		"phone":                  &person.Phones,
+		"address":                &person.Addresses,
+		model.KindURLAddress:     &person.URLAddresses,
+		model.KindSocialProfile:  &person.SocialProfiles,
+		model.KindInstantMessage: &person.InstantMessages,
+		model.KindDate:           &person.Dates,
+		model.KindRelation:       &person.ContactRelations,
+	}
 }
 
 func (s *Store) loadAvatar(ctx context.Context, person *model.Person) error {
@@ -247,13 +262,14 @@ where person_id = ?`, person.ID)
 func upsertPersonRow(ctx context.Context, tx *sql.Tx, person model.Person) error {
 	_, err := tx.ExecContext(ctx, `
 insert into people(
-  id, name, sort_name, aka_json, tags_json, avatar_json, accounts_json,
+  id, name, sort_name, card_json, aka_json, tags_json, avatar_json, accounts_json,
   sources_json, apple_json, google_json, body, annotation, annotation_stated_at,
   created_at, updated_at
-) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 on conflict(id) do update set
   name = excluded.name,
   sort_name = excluded.sort_name,
+  card_json = excluded.card_json,
   aka_json = excluded.aka_json,
   tags_json = excluded.tags_json,
   avatar_json = excluded.avatar_json,
@@ -266,7 +282,7 @@ on conflict(id) do update set
   annotation_stated_at = excluded.annotation_stated_at,
   created_at = excluded.created_at,
   updated_at = excluded.updated_at`,
-		person.ID, person.Name, person.SortName, mustJSONList(person.AKA), mustJSONList(person.Tags),
+		person.ID, person.Name, person.SortName, mustJSON(person.Card), mustJSONList(person.AKA), mustJSONList(person.Tags),
 		mustJSON(avatarMetadata(person.Avatar)), mustJSON(person.Accounts), mustJSON(person.Sources),
 		mustJSON(person.Apple), mustJSON(person.Google), person.Body, person.Annotation,
 		person.AnnotationStatedAt, timeText(person.CreatedAt), timeText(person.UpdatedAt))
@@ -300,12 +316,8 @@ func replaceContactValues(ctx context.Context, tx *sql.Tx, person model.Person) 
 	if _, err := tx.ExecContext(ctx, `delete from contact_values where person_id = ?`, person.ID); err != nil {
 		return err
 	}
-	for kind, values := range map[string][]model.ContactValue{
-		"email":   person.Emails,
-		"phone":   person.Phones,
-		"address": person.Addresses,
-	} {
-		for i, value := range values {
+	for kind, values := range personValueKinds(&person) {
+		for i, value := range *values {
 			if strings.TrimSpace(value.Value) == "" {
 				continue
 			}
@@ -342,11 +354,12 @@ func canonicalPerson(person model.Person) model.Person {
 	person.CreatedAt = person.CreatedAt.UTC()
 	person.UpdatedAt = person.UpdatedAt.UTC()
 	person.AnnotationStatedAt = strings.TrimSpace(person.AnnotationStatedAt)
+	person.Card = person.Clean()
 	person.AKA = cleanStrings(person.AKA)
 	person.Tags = cleanStrings(person.Tags)
-	person.Emails = cleanContactValues(person.Emails)
-	person.Phones = cleanContactValues(person.Phones)
-	person.Addresses = cleanContactValues(person.Addresses)
+	for _, values := range personValueKinds(&person) {
+		*values = cleanContactValues(*values)
+	}
 	person.Accounts = cleanAccounts(person.Accounts)
 	person.Sources = cleanSources(person.Sources)
 	person.Avatar = cleanAvatar(person.Avatar)

@@ -165,7 +165,8 @@ func personSearchMatches(person model.Person, query string) []SearchMatch {
 	values := []struct {
 		field string
 		value string
-	}{{"name", person.Name}, {"sort_name", person.SortName}, {"annotation", person.Annotation}, {"body", person.Body}, {"identifier", person.ID}}
+	}{{"name", person.Name}, {"sort_name", person.SortName}, {"annotation", person.Annotation}, {"body", person.Body}, {"identifier", person.ID},
+		{"nickname", person.Nickname}, {"organization_name", person.OrganizationName}, {"job_title", person.JobTitle}, {"note", person.Note}}
 	for _, value := range person.AKA {
 		values = append(values, struct{ field, value string }{"aka", value})
 	}
@@ -283,9 +284,10 @@ func withinRange(t, after, before time.Time) bool {
 }
 
 func personSearchText(person model.Person) string {
-	parts := []string{person.ID, person.Name, person.SortName, person.Body, person.Annotation}
+	parts := []string{person.ID, person.Name, person.SortName, person.Body, person.Annotation, person.Note, person.JobTitle}
 	parts = append(parts, person.AKA...)
 	parts = append(parts, person.Tags...)
+	parts = append(parts, person.SearchNames()...)
 	for _, source := range person.Sources {
 		parts = append(parts, source.Names...)
 	}

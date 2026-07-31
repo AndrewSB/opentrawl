@@ -16,6 +16,30 @@ message ContactsRecord {
   map<string, IdentifierList> accounts = 9;
   optional string annotation = 10;
   optional string annotation_stated_at = 11;
+
+  // The contact card as the source states it, in the vCard vocabulary shared
+  // by Apple Contacts, Google Contacts and CardDAV.
+  optional string given_name = 12;
+  optional string middle_name = 13;
+  optional string family_name = 14;
+  optional string previous_family_name = 15;
+  optional string name_prefix = 16;
+  optional string name_suffix = 17;
+  optional string nickname = 18;
+  optional string phonetic_given_name = 19;
+  optional string phonetic_middle_name = 20;
+  optional string phonetic_family_name = 21;
+  optional string phonetic_organization_name = 22;
+  optional string organization_name = 23;
+  optional string department_name = 24;
+  optional string job_title = 25;
+  optional string birthday = 26;
+  optional string note = 27;
+  repeated ContactValue url_addresses = 28;
+  repeated ContactValue social_profiles = 29;
+  repeated ContactValue instant_message_addresses = 30;
+  repeated ContactValue dates = 31;
+  repeated ContactValue contact_relations = 32;
 }
 
 message ContactValue {

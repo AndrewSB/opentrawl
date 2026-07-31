@@ -73,34 +73,44 @@ func sourceStateForError(err error) SourceState {
 	return SourceUnavailable
 }
 
+// Contact is one Apple Contacts card as stored, using the vCard field names
+// Apple itself exposes. Nothing here is derived: a card that states a nickname,
+// a job title or a maiden name keeps it as that field rather than having it
+// folded into a display name.
 type Contact struct {
-	Identifier string          `json:"identifier"`
-	FirstName  string          `json:"first_name"`
-	LastName   string          `json:"last_name"`
-	FullName   string          `json:"full_name"`
-	Emails     []string        `json:"emails"`
-	Phones     []string        `json:"phones"`
-	Addresses  []PostalAddress `json:"addresses,omitempty"`
-	AvatarData []byte          `json:"avatar_data,omitempty"`
+	Identifier      string         `json:"identifier"`
+	model.Card                     // given_name, nickname, job_title, birthday, note, ...
+	FullName        string         `json:"full_name"`
+	Emails          []LabeledValue `json:"emails"`
+	Phones          []LabeledValue `json:"phones"`
+	Addresses       []LabeledValue `json:"addresses,omitempty"`
+	URLAddresses    []LabeledValue `json:"url_addresses,omitempty"`
+	SocialProfiles  []LabeledValue `json:"social_profiles,omitempty"`
+	InstantMessages []LabeledValue `json:"instant_message_addresses,omitempty"`
+	Dates           []LabeledValue `json:"dates,omitempty"`
+	Relations       []LabeledValue `json:"contact_relations,omitempty"`
+	AvatarData      []byte         `json:"avatar_data,omitempty"`
 }
 
-type PostalAddress struct {
+// LabeledValue is any repeated card field. Apple attaches a label to every one
+// of them, so the label travels with the value instead of being discarded.
+type LabeledValue struct {
 	Value string `json:"value"`
 	Label string `json:"label,omitempty"`
 }
 
-func (a *PostalAddress) UnmarshalJSON(data []byte) error {
+func (v *LabeledValue) UnmarshalJSON(data []byte) error {
 	var value string
 	if err := json.Unmarshal(data, &value); err == nil {
-		*a = PostalAddress{Value: value}
+		*v = LabeledValue{Value: value}
 		return nil
 	}
-	type postalAddress PostalAddress
-	var parsed postalAddress
+	type labeledValue LabeledValue
+	var parsed labeledValue
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		return err
 	}
-	*a = PostalAddress(parsed)
+	*v = LabeledValue(parsed)
 	return nil
 }
 
@@ -108,26 +118,23 @@ func (c Contact) Name() string {
 	if strings.TrimSpace(c.FullName) != "" {
 		return strings.TrimSpace(c.FullName)
 	}
-	return strings.TrimSpace(strings.Join([]string{c.FirstName, c.LastName}, " "))
+	return strings.TrimSpace(strings.Join(nonEmptyStrings(c.GivenName, c.MiddleName, c.FamilyName), " "))
 }
 
 func (c Contact) SourceContact(includeAvatar bool) model.SourceContact {
-	out := model.SourceContact{Source: "apple", ExternalID: c.Identifier, Name: c.Name()}
-	for i, email := range c.Emails {
-		if strings.TrimSpace(email) != "" {
-			out.Emails = append(out.Emails, model.ContactValue{Value: email, Label: "other", Source: "apple", Primary: i == 0})
-		}
-	}
-	for i, phone := range c.Phones {
-		if strings.TrimSpace(phone) != "" {
-			out.Phones = append(out.Phones, model.ContactValue{Value: phone, Label: "other", Source: "apple", Primary: i == 0})
-		}
-	}
-	for i, address := range c.Addresses {
-		value := strings.TrimSpace(address.Value)
-		if value != "" {
-			out.Addresses = append(out.Addresses, model.ContactValue{Value: value, Label: addressLabel(address.Label), Source: "apple", Primary: i == 0})
-		}
+	out := model.SourceContact{
+		Source:          "apple",
+		ExternalID:      c.Identifier,
+		Name:            c.Name(),
+		Card:            c.Clean(),
+		Emails:          contactValues(c.Emails),
+		Phones:          contactValues(c.Phones),
+		Addresses:       contactValues(c.Addresses),
+		URLAddresses:    contactValues(c.URLAddresses),
+		SocialProfiles:  contactValues(c.SocialProfiles),
+		InstantMessages: contactValues(c.InstantMessages),
+		Dates:           contactValues(c.Dates),
+		Relations:       contactValues(c.Relations),
 	}
 	if includeAvatar && len(c.AvatarData) > 0 {
 		out.Avatar = &model.SourceAvatar{Data: append([]byte(nil), c.AvatarData...)}
@@ -135,18 +142,38 @@ func (c Contact) SourceContact(includeAvatar bool) model.SourceContact {
 	return out
 }
 
-func addressLabel(label string) string {
-	normalized := strings.ToLower(strings.TrimSpace(label))
-	normalized = strings.TrimPrefix(normalized, "_$!<")
-	normalized = strings.TrimSuffix(normalized, ">!$_")
-	switch normalized {
-	case "home":
-		return "home"
-	case "work":
-		return "work"
-	default:
+func contactValues(values []LabeledValue) []model.ContactValue {
+	out := make([]model.ContactValue, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value.Value)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, model.ContactValue{
+			Value:   trimmed,
+			Label:   contactLabel(value.Label),
+			Source:  "apple",
+			Primary: len(out) == 0,
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// contactLabel unwraps Apple's `_$!<Home>!$_` label encoding. A custom label a
+// person typed themselves is kept as they typed it; only the wrapper and case
+// of Apple's own labels are normalised.
+func contactLabel(label string) string {
+	label = strings.TrimSpace(label)
+	if unwrapped := strings.TrimSuffix(strings.TrimPrefix(label, "_$!<"), ">!$_"); unwrapped != label {
+		return strings.ToLower(strings.TrimSpace(unwrapped))
+	}
+	if label == "" {
 		return "other"
 	}
+	return strings.ToLower(label)
 }
 
 func ReadFile(path string) ([]Contact, error) {
@@ -189,6 +216,16 @@ func Decode(r io.Reader) ([]Contact, error) {
 		contacts = append(contacts, c)
 	}
 	return contacts, scanner.Err()
+}
+
+func nonEmptyStrings(values ...string) []string {
+	var out []string
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func ToSourceContacts(contacts []Contact, includeAvatars bool) []model.SourceContact {

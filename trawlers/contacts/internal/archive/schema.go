@@ -1,10 +1,28 @@
 package archive
 
+// contactValuesTable is shared with the schema migration, which rebuilds the
+// table in place to widen the kinds an existing archive accepts.
+const contactValuesTable = `
+create table if not exists contact_values (
+  person_id text not null references people(id) on delete cascade,
+  kind text not null check(kind in ('email', 'phone', 'address', 'url_address', 'social_profile', 'instant_message_address', 'date', 'contact_relation')),
+  position integer not null,
+  value text not null default '',
+  label text not null default '',
+  source text not null default '',
+  primary_value integer not null default 0,
+  primary key(person_id, kind, position)
+);
+`
+
+const contactValuesIndex = `create index if not exists idx_contact_values_person on contact_values(person_id, kind, position);`
+
 const schema = `
 create table if not exists people (
   id text primary key,
   name text not null,
   sort_name text not null default '',
+  card_json text not null default '{}',
   aka_json text not null default '[]',
   tags_json text not null default '[]',
   avatar_json text not null default '{}',
@@ -26,17 +44,6 @@ create table if not exists person_avatars (
   sha256 text not null,
   source text not null default '',
   updated_at text not null
-);
-
-create table if not exists contact_values (
-  person_id text not null references people(id) on delete cascade,
-  kind text not null check(kind in ('email', 'phone', 'address')),
-  position integer not null,
-  value text not null default '',
-  label text not null default '',
-  source text not null default '',
-  primary_value integer not null default 0,
-  primary key(person_id, kind, position)
 );
 
 create table if not exists identifiers (
@@ -79,7 +86,6 @@ create table if not exists notes (
   body text not null default ''
 );
 
-create index if not exists idx_contact_values_person on contact_values(person_id, kind, position);
 create index if not exists idx_identifiers_person on identifiers(person_id);
 create index if not exists idx_source_contacts_person on source_contacts(person_id);
 create index if not exists idx_notes_person on notes(person_id, occurred_at);

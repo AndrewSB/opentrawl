@@ -10,14 +10,23 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	sqlite3 "github.com/mattn/go-sqlite3"
+	"github.com/opentrawl/opentrawl/trawlers/contacts/internal/model"
 	"github.com/opentrawl/opentrawl/trawlkit/cache"
 	ckstore "github.com/opentrawl/opentrawl/trawlkit/store"
 )
 
-const addressBookDBName = "AddressBook-v22.abcddb"
+const (
+	addressBookDBName = "AddressBook-v22.abcddb"
+	// Core Data counts seconds from 2001-01-01 UTC.
+	appleEpochOffset = 978307200
+	// Apple records a birthday with no year in year 1604.
+	yearlessDateYear = 1604
+)
 
 type addressBookAccessError struct {
 	Path string
@@ -49,23 +58,52 @@ func (e addressBookAccessError) Unwrap() error {
 }
 
 type addressBookSchema struct {
-	contactEntity int64
-	recordColumns map[string]bool
-	phoneColumns  map[string]bool
-	emailColumns  map[string]bool
-	postalColumns map[string]bool
+	contactEntity  int64
+	recordColumns  map[string]bool
+	phoneColumns   map[string]bool
+	emailColumns   map[string]bool
+	postalColumns  map[string]bool
+	noteColumns    map[string]bool
+	urlColumns     map[string]bool
+	socialColumns  map[string]bool
+	messageColumns map[string]bool
+	dateColumns    map[string]bool
+	relatedColumns map[string]bool
 }
 
 type addressBookRecord struct {
-	contact Contact
-	phones  []labeledValue
-	emails  []labeledValue
-	postal  []PostalAddress
+	contact  Contact
+	phones   []LabeledValue
+	emails   []LabeledValue
+	postal   []LabeledValue
+	urls     []LabeledValue
+	social   []LabeledValue
+	messages []LabeledValue
+	dates    []LabeledValue
+	related  []LabeledValue
 }
 
-type labeledValue struct {
-	value string
-	label string
+// cardColumns maps the single-valued card columns to their vCard field. Every
+// one is read through optionalTextExpression, so an address book that predates
+// a column simply leaves that field blank.
+var cardColumns = []struct {
+	column string
+	assign func(*model.Card, string)
+}{
+	{"ZFIRSTNAME", func(c *model.Card, v string) { c.GivenName = v }},
+	{"ZMIDDLENAME", func(c *model.Card, v string) { c.MiddleName = v }},
+	{"ZLASTNAME", func(c *model.Card, v string) { c.FamilyName = v }},
+	{"ZMAIDENNAME", func(c *model.Card, v string) { c.PreviousFamilyName = v }},
+	{"ZTITLE", func(c *model.Card, v string) { c.NamePrefix = v }},
+	{"ZSUFFIX", func(c *model.Card, v string) { c.NameSuffix = v }},
+	{"ZNICKNAME", func(c *model.Card, v string) { c.Nickname = v }},
+	{"ZPHONETICFIRSTNAME", func(c *model.Card, v string) { c.PhoneticGivenName = v }},
+	{"ZPHONETICMIDDLENAME", func(c *model.Card, v string) { c.PhoneticMiddleName = v }},
+	{"ZPHONETICLASTNAME", func(c *model.Card, v string) { c.PhoneticFamilyName = v }},
+	{"ZPHONETICORGANIZATION", func(c *model.Card, v string) { c.PhoneticOrganizationName = v }},
+	{"ZORGANIZATION", func(c *model.Card, v string) { c.OrganizationName = v }},
+	{"ZDEPARTMENT", func(c *model.Card, v string) { c.DepartmentName = v }},
+	{"ZJOBTITLE", func(c *model.Card, v string) { c.JobTitle = v }},
 }
 
 func ReadSystem(ctx context.Context) ([]Contact, error) {
@@ -217,26 +255,167 @@ func readAddressBookDatabase(ctx context.Context, path string) ([]Contact, error
 	if err := readAddressBookPostalAddresses(ctx, db, schema, records); err != nil {
 		return nil, err
 	}
+	if err := readAddressBookCardValues(ctx, db, schema, records); err != nil {
+		return nil, err
+	}
 
 	contacts := make([]Contact, 0, len(records))
 	for _, pk := range order {
 		record := records[pk]
+		// A card with a name is a contact. Apple keeps name-only and
+		// organisation-only cards, so requiring a phone or an email here would
+		// drop them from the archive entirely.
 		if strings.TrimSpace(record.contact.Name()) == "" {
 			continue
 		}
-		for _, email := range record.emails {
-			record.contact.Emails = append(record.contact.Emails, email.value)
-		}
-		for _, phone := range record.phones {
-			record.contact.Phones = append(record.contact.Phones, phone.value)
-		}
-		record.contact.Addresses = append(record.contact.Addresses, record.postal...)
-		if len(record.contact.Emails) == 0 && len(record.contact.Phones) == 0 && len(record.contact.Addresses) == 0 {
-			continue
-		}
+		record.contact.Emails = record.emails
+		record.contact.Phones = record.phones
+		record.contact.Addresses = record.postal
+		record.contact.URLAddresses = record.urls
+		record.contact.SocialProfiles = record.social
+		record.contact.InstantMessages = record.messages
+		record.contact.Dates = record.dates
+		record.contact.Relations = record.related
 		contacts = append(contacts, record.contact)
 	}
 	return contacts, nil
+}
+
+// readAddressBookCardValues reads the repeated card fields that live in their
+// own tables. Each table is optional: an address book that does not have one
+// contributes nothing rather than failing the whole read.
+func readAddressBookCardValues(ctx context.Context, db *sql.DB, schema addressBookSchema, records map[int64]*addressBookRecord) error {
+	if err := readAddressBookNotes(ctx, db, schema, records); err != nil {
+		return err
+	}
+	for _, table := range []struct {
+		name    string
+		columns map[string]bool
+		value   string
+		service string
+		date    bool
+		assign  func(*addressBookRecord, LabeledValue)
+	}{
+		{name: "ZABCDURLADDRESS", columns: schema.urlColumns, value: "ZURL",
+			assign: func(r *addressBookRecord, v LabeledValue) { r.urls = appendUniqueLabeledValue(r.urls, v) }},
+		{name: "ZABCDSOCIALPROFILE", columns: schema.socialColumns, value: "ZUSERNAME", service: "ZSERVICENAME",
+			assign: func(r *addressBookRecord, v LabeledValue) { r.social = appendUniqueLabeledValue(r.social, v) }},
+		{name: "ZABCDMESSAGINGADDRESS", columns: schema.messageColumns, value: "ZADDRESS", service: "ZSERVICENAME",
+			assign: func(r *addressBookRecord, v LabeledValue) { r.messages = appendUniqueLabeledValue(r.messages, v) }},
+		{name: "ZABCDDATE", columns: schema.dateColumns, value: "ZDATE", date: true,
+			assign: func(r *addressBookRecord, v LabeledValue) { r.dates = appendUniqueLabeledValue(r.dates, v) }},
+		{name: "ZABCDRELATEDNAME", columns: schema.relatedColumns, value: "ZNAME",
+			assign: func(r *addressBookRecord, v LabeledValue) { r.related = appendUniqueLabeledValue(r.related, v) }},
+	} {
+		if !table.columns[table.value] {
+			continue
+		}
+		owner, err := ownerExpression(table.columns)
+		if err != nil {
+			continue
+		}
+		// A social profile without a username, and any profile at all, still
+		// has a URL worth keeping.
+		valueExpr := "coalesce(nullif(" + table.value + ", ''), " + optionalTextExpression(table.columns, "ZURL") + ")"
+		if table.date {
+			valueExpr = optionalNumberExpression(table.columns, table.value)
+		}
+		query := fmt.Sprintf(`select %s, %s, %s, %s from %s order by %s`,
+			owner, valueExpr,
+			optionalTextExpression(table.columns, "ZLABEL"),
+			optionalTextExpression(table.columns, table.service),
+			table.name, orderingExpression(table.columns))
+		if err := readCardValueRows(ctx, db, query, table.date, func(owner int64, value LabeledValue) {
+			if record := records[owner]; record != nil {
+				table.assign(record, value)
+			}
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// readCardValueRows reads one repeated card table. The service name a card
+// states for a social or messaging handle is the label a reader wants, so it
+// wins over Apple's generic label when both are present.
+func readCardValueRows(ctx context.Context, db *sql.DB, query string, date bool, add func(int64, LabeledValue)) error {
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var owner int64
+		var raw sql.NullString
+		var label, service string
+		if err := rows.Scan(&owner, &raw, &label, &service); err != nil {
+			return err
+		}
+		value := strings.TrimSpace(raw.String)
+		if date {
+			value = appleDateText(parseAppleNumber(raw))
+		}
+		if owner == 0 || value == "" {
+			continue
+		}
+		if service = strings.TrimSpace(service); service != "" {
+			label = service
+		}
+		add(owner, LabeledValue{Value: value, Label: label})
+	}
+	return rows.Err()
+}
+
+func parseAppleNumber(value sql.NullString) sql.NullFloat64 {
+	if !value.Valid {
+		return sql.NullFloat64{}
+	}
+	seconds, err := strconv.ParseFloat(strings.TrimSpace(value.String), 64)
+	if err != nil {
+		return sql.NullFloat64{}
+	}
+	return sql.NullFloat64{Float64: seconds, Valid: true}
+}
+
+func readAddressBookNotes(ctx context.Context, db *sql.DB, schema addressBookSchema, records map[int64]*addressBookRecord) error {
+	if !schema.noteColumns["ZTEXT"] {
+		return nil
+	}
+	owner, err := ownerExpression(schema.noteColumns, "ZCONTACT")
+	if err != nil {
+		return nil
+	}
+	rows, err := db.QueryContext(ctx, fmt.Sprintf(`select %s, coalesce(ZTEXT, '') from ZABCDNOTE`, owner))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var owner int64
+		var text string
+		if err := rows.Scan(&owner, &text); err != nil {
+			return err
+		}
+		if record := records[owner]; record != nil && strings.TrimSpace(text) != "" {
+			record.contact.Note = strings.TrimSpace(text)
+		}
+	}
+	return rows.Err()
+}
+
+// appleDateText formats a Core Data timestamp, which counts seconds from
+// 2001-01-01 UTC. Apple stores a birthday whose year the card omits in year
+// 1604, and a reader must not report that as a real year.
+func appleDateText(value sql.NullFloat64) string {
+	if !value.Valid {
+		return ""
+	}
+	moment := time.Unix(int64(value.Float64)+appleEpochOffset, 0).UTC()
+	if moment.Year() == yearlessDateYear {
+		return moment.Format("--01-02")
+	}
+	return moment.Format("2006-01-02")
 }
 
 func checkAddressBookDatabase(ctx context.Context, path string) error {
@@ -303,6 +482,14 @@ func inspectAddressBookSchema(ctx context.Context, db *sql.DB, path string) (add
 	if err != nil {
 		return schema, err
 	}
+	// The repeated card tables are optional. Their absence costs those fields,
+	// not the read.
+	schema.noteColumns = optionalTableColumns(ctx, db, "ZABCDNOTE")
+	schema.urlColumns = optionalTableColumns(ctx, db, "ZABCDURLADDRESS")
+	schema.socialColumns = optionalTableColumns(ctx, db, "ZABCDSOCIALPROFILE")
+	schema.messageColumns = optionalTableColumns(ctx, db, "ZABCDMESSAGINGADDRESS")
+	schema.dateColumns = optionalTableColumns(ctx, db, "ZABCDDATE")
+	schema.relatedColumns = optionalTableColumns(ctx, db, "ZABCDRELATEDNAME")
 	primaryKeyColumns, err := tableColumns(ctx, db, "Z_PRIMARYKEY")
 	if err != nil {
 		return schema, err
@@ -377,22 +564,33 @@ func tableColumns(ctx context.Context, db *sql.DB, table string) (map[string]boo
 	return columns, nil
 }
 
+func optionalTableColumns(ctx context.Context, db *sql.DB, table string) map[string]bool {
+	columns, err := tableColumns(ctx, db, table)
+	if err != nil {
+		return nil
+	}
+	return columns
+}
+
 func unrecognisedAddressBookLayout(path, table, column string) error {
 	return invalidSchema(fmt.Errorf("unrecognised AddressBook database layout in %s: missing column %s.%s", path, table, column))
 }
 
 func readAddressBookRecords(ctx context.Context, db *sql.DB, schema addressBookSchema) (map[int64]*addressBookRecord, []int64, error) {
 	idExpr := firstPresentExpression(schema.recordColumns, "ZUNIQUEID", "ZEXTERNALUUID", "ZEXTERNALIDENTIFIER")
-	middleExpr := optionalTextExpression(schema.recordColumns, "ZMIDDLENAME")
 	avatarExpr := "null"
 	if schema.recordColumns["ZTHUMBNAILIMAGEDATA"] {
 		avatarExpr = "ZTHUMBNAILIMAGEDATA"
 	}
+	expressions := []string{"Z_PK", idExpr, avatarExpr, optionalNumberExpression(schema.recordColumns, "ZBIRTHDAY")}
+	for _, column := range cardColumns {
+		expressions = append(expressions, optionalTextExpression(schema.recordColumns, column.column))
+	}
 	query := fmt.Sprintf(`
-select Z_PK, %s, coalesce(ZFIRSTNAME, ''), %s, coalesce(ZLASTNAME, ''), coalesce(ZORGANIZATION, ''), %s
+select %s
 from ZABCDRECORD
 where Z_ENT = ?
-order by Z_PK`, idExpr, middleExpr, avatarExpr)
+order by Z_PK`, strings.Join(expressions, ", "))
 	rows, err := db.QueryContext(ctx, query, schema.contactEntity)
 	if err != nil {
 		return nil, nil, err
@@ -402,22 +600,27 @@ order by Z_PK`, idExpr, middleExpr, avatarExpr)
 	var order []int64
 	for rows.Next() {
 		var pk int64
-		var identifier, firstName, middleName, lastName, organisation string
+		var identifier string
 		var avatar []byte
-		if err := rows.Scan(&pk, &identifier, &firstName, &middleName, &lastName, &organisation, &avatar); err != nil {
+		var birthday sql.NullFloat64
+		card := make([]string, len(cardColumns))
+		targets := []any{&pk, &identifier, &avatar, &birthday}
+		for i := range card {
+			targets = append(targets, &card[i])
+		}
+		if err := rows.Scan(targets...); err != nil {
 			return nil, nil, err
 		}
 		identifier = strings.TrimSpace(identifier)
 		if identifier == "" {
 			continue
 		}
-		contact := Contact{
-			Identifier: identifier,
-			FirstName:  strings.TrimSpace(firstName),
-			LastName:   strings.TrimSpace(lastName),
-			FullName:   fullName(firstName, middleName, lastName, organisation),
-			AvatarData: append([]byte(nil), avatar...),
+		contact := Contact{Identifier: identifier, AvatarData: append([]byte(nil), avatar...)}
+		for i, column := range cardColumns {
+			column.assign(&contact.Card, strings.TrimSpace(card[i]))
 		}
+		contact.Birthday = appleDateText(birthday)
+		contact.FullName = fullName(contact.Card)
 		records[pk] = &addressBookRecord{contact: contact}
 		order = append(order, pk)
 	}
@@ -439,7 +642,7 @@ select %s, coalesce(ZFULLNUMBER, ''), %s
 from ZABCDPHONENUMBER
 where trim(coalesce(ZFULLNUMBER, '')) <> ''
 order by %s`, owner, labelExpr, orderExpr)
-	return readLabeledValues(ctx, db, query, func(owner int64, value labeledValue) {
+	return readLabeledValues(ctx, db, query, func(owner int64, value LabeledValue) {
 		if record := records[owner]; record != nil {
 			record.phones = appendUniqueLabeledValue(record.phones, value)
 		}
@@ -458,7 +661,7 @@ select %s, coalesce(ZADDRESS, ''), %s
 from ZABCDEMAILADDRESS
 where trim(coalesce(ZADDRESS, '')) <> ''
 order by %s`, owner, labelExpr, orderExpr)
-	return readLabeledValues(ctx, db, query, func(owner int64, value labeledValue) {
+	return readLabeledValues(ctx, db, query, func(owner int64, value LabeledValue) {
 		if record := records[owner]; record != nil {
 			record.emails = appendUniqueLabeledValue(record.emails, value)
 		}
@@ -502,13 +705,13 @@ order by %s`,
 			continue
 		}
 		if record := records[owner]; record != nil {
-			record.postal = appendUniquePostalAddress(record.postal, PostalAddress{Value: value, Label: label})
+			record.postal = appendUniquePostalAddress(record.postal, LabeledValue{Value: value, Label: label})
 		}
 	}
 	return rows.Err()
 }
 
-func readLabeledValues(ctx context.Context, db *sql.DB, query string, add func(int64, labeledValue)) error {
+func readLabeledValues(ctx context.Context, db *sql.DB, query string, add func(int64, LabeledValue)) error {
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return err
@@ -524,7 +727,7 @@ func readLabeledValues(ctx context.Context, db *sql.DB, query string, add func(i
 		if owner == 0 || value == "" {
 			continue
 		}
-		add(owner, labeledValue{value: value, label: label})
+		add(owner, LabeledValue{Value: value, Label: label})
 	}
 	return rows.Err()
 }
@@ -549,8 +752,25 @@ func optionalTextExpression(columns map[string]bool, name string) string {
 	return "''"
 }
 
-func ownerExpression(columns map[string]bool) (string, error) {
+// optionalNumberExpression casts so that the driver reports the raw Core Data
+// number rather than converting a column declared as a timestamp.
+func optionalNumberExpression(columns map[string]bool, name string) string {
+	if columns[name] {
+		return "cast(" + name + " as real)"
+	}
+	return "null"
+}
+
+// ownerExpression finds the column linking a repeated value back to its
+// record. Core Data names it per entity version, and notes link through
+// ZCONTACT instead, so callers pass the names they also accept.
+func ownerExpression(columns map[string]bool, preferred ...string) (string, error) {
 	var expressions []string
+	for _, name := range preferred {
+		if columns[name] {
+			expressions = append(expressions, "nullif("+name+", 0)")
+		}
+	}
 	if columns["ZOWNER"] {
 		expressions = append(expressions, "nullif(ZOWNER, 0)")
 	}
@@ -599,12 +819,16 @@ func hasAnyColumn(columns map[string]bool, names ...string) bool {
 	return false
 }
 
-func fullName(firstName, middleName, lastName, organisation string) string {
-	name := strings.Join(nonEmptyStrings(firstName, middleName, lastName), " ")
-	if strings.TrimSpace(name) != "" {
+// fullName is the display name only. Every part it draws on is also kept as
+// its own card field, so nothing here is the sole record of a value.
+func fullName(card model.Card) string {
+	if name := strings.Join(nonEmptyStrings(card.GivenName, card.MiddleName, card.FamilyName), " "); name != "" {
 		return name
 	}
-	return strings.TrimSpace(organisation)
+	if card.OrganizationName != "" {
+		return strings.TrimSpace(card.OrganizationName)
+	}
+	return strings.TrimSpace(card.Nickname)
 }
 
 func postalAddressValue(street, city, state, zipCode, countryName, countryCode string) string {
@@ -630,29 +854,20 @@ func postalAddressValue(street, city, state, zipCode, countryName, countryCode s
 	return strings.Join(nonEmptyStrings(street, locality, countryName), "\n")
 }
 
-func nonEmptyStrings(values ...string) []string {
-	var out []string
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			out = append(out, value)
-		}
-	}
-	return out
-}
-
+// mergeContact folds the same contact seen in two address book databases into
+// one card. The first database to state a field owns it.
 func mergeContact(base, incoming Contact) Contact {
-	if strings.TrimSpace(base.FirstName) == "" {
-		base.FirstName = incoming.FirstName
-	}
-	if strings.TrimSpace(base.LastName) == "" {
-		base.LastName = incoming.LastName
-	}
+	base.Card = base.Fill(incoming.Card)
 	if strings.TrimSpace(base.FullName) == "" {
 		base.FullName = incoming.FullName
 	}
-	base.Emails = appendUniqueStrings(base.Emails, incoming.Emails...)
-	base.Phones = appendUniqueStrings(base.Phones, incoming.Phones...)
+	base.Emails = appendUniqueLabeledValues(base.Emails, incoming.Emails)
+	base.Phones = appendUniqueLabeledValues(base.Phones, incoming.Phones)
+	base.URLAddresses = appendUniqueLabeledValues(base.URLAddresses, incoming.URLAddresses)
+	base.SocialProfiles = appendUniqueLabeledValues(base.SocialProfiles, incoming.SocialProfiles)
+	base.InstantMessages = appendUniqueLabeledValues(base.InstantMessages, incoming.InstantMessages)
+	base.Dates = appendUniqueLabeledValues(base.Dates, incoming.Dates)
+	base.Relations = appendUniqueLabeledValues(base.Relations, incoming.Relations)
 	for _, address := range incoming.Addresses {
 		base.Addresses = appendUniquePostalAddress(base.Addresses, address)
 	}
@@ -662,37 +877,27 @@ func mergeContact(base, incoming Contact) Contact {
 	return base
 }
 
-func appendUniqueStrings(values []string, incoming ...string) []string {
-	seen := map[string]bool{}
-	for _, value := range values {
-		seen[strings.ToLower(strings.TrimSpace(value))] = true
-	}
+func appendUniqueLabeledValues(values []LabeledValue, incoming []LabeledValue) []LabeledValue {
 	for _, value := range incoming {
-		value = strings.TrimSpace(value)
-		key := strings.ToLower(value)
-		if value == "" || seen[key] {
-			continue
-		}
-		values = append(values, value)
-		seen[key] = true
+		values = appendUniqueLabeledValue(values, value)
 	}
 	return values
 }
 
-func appendUniqueLabeledValue(values []labeledValue, incoming labeledValue) []labeledValue {
-	key := strings.ToLower(strings.TrimSpace(incoming.value))
+func appendUniqueLabeledValue(values []LabeledValue, incoming LabeledValue) []LabeledValue {
+	key := strings.ToLower(strings.TrimSpace(incoming.Value))
 	if key == "" {
 		return values
 	}
 	for _, value := range values {
-		if strings.ToLower(strings.TrimSpace(value.value)) == key {
+		if strings.ToLower(strings.TrimSpace(value.Value)) == key {
 			return values
 		}
 	}
-	return append(values, labeledValue{value: strings.TrimSpace(incoming.value), label: strings.TrimSpace(incoming.label)})
+	return append(values, LabeledValue{Value: strings.TrimSpace(incoming.Value), Label: strings.TrimSpace(incoming.Label)})
 }
 
-func appendUniquePostalAddress(values []PostalAddress, incoming PostalAddress) []PostalAddress {
+func appendUniquePostalAddress(values []LabeledValue, incoming LabeledValue) []LabeledValue {
 	incoming.Value = strings.TrimSpace(incoming.Value)
 	incoming.Label = strings.TrimSpace(incoming.Label)
 	if incoming.Value == "" {

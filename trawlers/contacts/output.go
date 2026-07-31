@@ -28,14 +28,20 @@ type publicContactValue struct {
 }
 
 type publicPerson struct {
-	Ref                string               `json:"ref"`
-	Name               string               `json:"name"`
-	SortName           string               `json:"sort_name,omitempty"`
+	Ref      string `json:"ref"`
+	Name     string `json:"name"`
+	SortName string `json:"sort_name,omitempty"`
+	model.Card
 	AKA                []string             `json:"aka,omitempty"`
 	Tags               []string             `json:"tags,omitempty"`
 	Emails             []publicContactValue `json:"emails,omitempty"`
 	Phones             []publicContactValue `json:"phones,omitempty"`
 	Addresses          []publicContactValue `json:"addresses,omitempty"`
+	URLAddresses       []publicContactValue `json:"url_addresses,omitempty"`
+	SocialProfiles     []publicContactValue `json:"social_profiles,omitempty"`
+	InstantMessages    []publicContactValue `json:"instant_message_addresses,omitempty"`
+	Dates              []publicContactValue `json:"dates,omitempty"`
+	ContactRelations   []publicContactValue `json:"contact_relations,omitempty"`
 	Accounts           map[string][]string  `json:"accounts,omitempty"`
 	Annotation         string               `json:"annotation,omitempty"`
 	AnnotationStatedAt string               `json:"annotation_stated_at,omitempty"`
@@ -118,12 +124,24 @@ func writePerson(req *trawlkit.Request, person model.Person) error {
 		Title: person.Name,
 		Fields: []render.CardField{
 			{Label: "id", Value: person.ID},
+			{Label: "nickname", Value: person.Nickname},
 			{Label: "aka", Value: strings.Join(person.AKA, ", ")},
+			{Label: "maiden name", Value: person.PreviousFamilyName},
+			{Label: "job title", Value: person.JobTitle},
+			{Label: "department", Value: person.DepartmentName},
+			{Label: "organization", Value: person.OrganizationName},
+			{Label: "birthday", Value: person.Birthday},
 			{Label: "tags", Value: strings.Join(person.Tags, ", ")},
 			{Label: "email", Value: joinContactValues(person.Emails)},
 			{Label: "phone", Value: joinPhoneValues(person.Phones)},
 			{Label: "address", Value: joinAddresses(person.Addresses)},
+			{Label: "website", Value: joinContactValues(person.URLAddresses)},
+			{Label: "social", Value: joinLabeledValues(person.SocialProfiles)},
+			{Label: "instant message", Value: joinLabeledValues(person.InstantMessages)},
+			{Label: "dates", Value: joinLabeledValues(person.Dates)},
+			{Label: "related", Value: joinLabeledValues(person.ContactRelations)},
 			{Label: "sources", Value: strings.Join(sortedSourceNames(person), ", ")},
+			{Label: "note", Value: person.Note},
 			{Label: "annotation", Value: person.Annotation},
 			{Label: "stated", Value: person.AnnotationStatedAt},
 		},
@@ -149,11 +167,17 @@ func projectPublicPerson(person model.Person) publicPerson {
 		Ref:                archive.PersonRef(person.ID),
 		Name:               person.Name,
 		SortName:           person.SortName,
+		Card:               person.Card,
 		AKA:                append([]string(nil), person.AKA...),
 		Tags:               append([]string(nil), person.Tags...),
 		Emails:             projectPublicContactValues(person.Emails),
 		Phones:             projectPublicContactValues(person.Phones),
 		Addresses:          projectPublicContactValues(person.Addresses),
+		URLAddresses:       projectPublicContactValues(person.URLAddresses),
+		SocialProfiles:     projectPublicContactValues(person.SocialProfiles),
+		InstantMessages:    projectPublicContactValues(person.InstantMessages),
+		Dates:              projectPublicContactValues(person.Dates),
+		ContactRelations:   projectPublicContactValues(person.ContactRelations),
 		Accounts:           copyAccounts(person.Accounts),
 		Annotation:         person.Annotation,
 		AnnotationStatedAt: person.AnnotationStatedAt,
@@ -206,6 +230,24 @@ func joinContactValues(values []model.ContactValue) string {
 		if strings.TrimSpace(value.Value) != "" {
 			out = append(out, strings.TrimSpace(value.Value))
 		}
+	}
+	return strings.Join(out, ", ")
+}
+
+// joinLabeledValues keeps the label alongside the value for the card fields
+// whose label carries the meaning: which service a handle is on, or what a
+// date or a related name is to the person.
+func joinLabeledValues(values []model.ContactValue) string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		text := strings.TrimSpace(value.Value)
+		if text == "" {
+			continue
+		}
+		if label := strings.TrimSpace(value.Label); label != "" && label != "other" {
+			text = label + ": " + text
+		}
+		out = append(out, text)
 	}
 	return strings.Join(out, ", ")
 }

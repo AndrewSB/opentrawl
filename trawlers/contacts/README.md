@@ -29,6 +29,27 @@ trawl sync contacts
 Later source snapshots replace only that source's values. Values from other
 sources and user annotations remain intact.
 
+## The contact card
+
+A sync keeps the whole card a source states, in the vCard field names Apple
+Contacts, Google Contacts and CardDAV share, rather than flattening it into a
+display name:
+
+- names: given, middle and family name, maiden name, prefix and suffix,
+  nickname, and the phonetic spellings
+- work: organisation, department and job title
+- birthday, and any other labelled date such as an anniversary
+- websites, social profiles, instant message addresses and related names, each
+  keeping the label or service name the source attached to it
+- the note on the card
+
+Nicknames, maiden names, phonetic spellings and organisations are searchable
+aliases, so `trawl contacts search` finds a person by any of them. Emails and
+phone numbers keep their own labels; a custom label is kept as it was typed.
+A card with a name but no phone or email is a contact and is kept.
+
+OpenTrawl does not import contact photos yet.
+
 ## Commands
 
 ```sh

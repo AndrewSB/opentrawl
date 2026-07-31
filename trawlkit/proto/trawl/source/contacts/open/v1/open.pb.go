@@ -34,8 +34,31 @@ type ContactsRecord struct {
 	Accounts           map[string]*IdentifierList `protobuf:"bytes,9,rep,name=accounts,proto3" json:"accounts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Annotation         *string                    `protobuf:"bytes,10,opt,name=annotation,proto3,oneof" json:"annotation,omitempty"`
 	AnnotationStatedAt *string                    `protobuf:"bytes,11,opt,name=annotation_stated_at,json=annotationStatedAt,proto3,oneof" json:"annotation_stated_at,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// The contact card as the source states it, in the vCard vocabulary shared
+	// by Apple Contacts, Google Contacts and CardDAV.
+	GivenName                *string         `protobuf:"bytes,12,opt,name=given_name,json=givenName,proto3,oneof" json:"given_name,omitempty"`
+	MiddleName               *string         `protobuf:"bytes,13,opt,name=middle_name,json=middleName,proto3,oneof" json:"middle_name,omitempty"`
+	FamilyName               *string         `protobuf:"bytes,14,opt,name=family_name,json=familyName,proto3,oneof" json:"family_name,omitempty"`
+	PreviousFamilyName       *string         `protobuf:"bytes,15,opt,name=previous_family_name,json=previousFamilyName,proto3,oneof" json:"previous_family_name,omitempty"`
+	NamePrefix               *string         `protobuf:"bytes,16,opt,name=name_prefix,json=namePrefix,proto3,oneof" json:"name_prefix,omitempty"`
+	NameSuffix               *string         `protobuf:"bytes,17,opt,name=name_suffix,json=nameSuffix,proto3,oneof" json:"name_suffix,omitempty"`
+	Nickname                 *string         `protobuf:"bytes,18,opt,name=nickname,proto3,oneof" json:"nickname,omitempty"`
+	PhoneticGivenName        *string         `protobuf:"bytes,19,opt,name=phonetic_given_name,json=phoneticGivenName,proto3,oneof" json:"phonetic_given_name,omitempty"`
+	PhoneticMiddleName       *string         `protobuf:"bytes,20,opt,name=phonetic_middle_name,json=phoneticMiddleName,proto3,oneof" json:"phonetic_middle_name,omitempty"`
+	PhoneticFamilyName       *string         `protobuf:"bytes,21,opt,name=phonetic_family_name,json=phoneticFamilyName,proto3,oneof" json:"phonetic_family_name,omitempty"`
+	PhoneticOrganizationName *string         `protobuf:"bytes,22,opt,name=phonetic_organization_name,json=phoneticOrganizationName,proto3,oneof" json:"phonetic_organization_name,omitempty"`
+	OrganizationName         *string         `protobuf:"bytes,23,opt,name=organization_name,json=organizationName,proto3,oneof" json:"organization_name,omitempty"`
+	DepartmentName           *string         `protobuf:"bytes,24,opt,name=department_name,json=departmentName,proto3,oneof" json:"department_name,omitempty"`
+	JobTitle                 *string         `protobuf:"bytes,25,opt,name=job_title,json=jobTitle,proto3,oneof" json:"job_title,omitempty"`
+	Birthday                 *string         `protobuf:"bytes,26,opt,name=birthday,proto3,oneof" json:"birthday,omitempty"`
+	Note                     *string         `protobuf:"bytes,27,opt,name=note,proto3,oneof" json:"note,omitempty"`
+	UrlAddresses             []*ContactValue `protobuf:"bytes,28,rep,name=url_addresses,json=urlAddresses,proto3" json:"url_addresses,omitempty"`
+	SocialProfiles           []*ContactValue `protobuf:"bytes,29,rep,name=social_profiles,json=socialProfiles,proto3" json:"social_profiles,omitempty"`
+	InstantMessageAddresses  []*ContactValue `protobuf:"bytes,30,rep,name=instant_message_addresses,json=instantMessageAddresses,proto3" json:"instant_message_addresses,omitempty"`
+	Dates                    []*ContactValue `protobuf:"bytes,31,rep,name=dates,proto3" json:"dates,omitempty"`
+	ContactRelations         []*ContactValue `protobuf:"bytes,32,rep,name=contact_relations,json=contactRelations,proto3" json:"contact_relations,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *ContactsRecord) Reset() {
@@ -143,6 +166,153 @@ func (x *ContactsRecord) GetAnnotationStatedAt() string {
 		return *x.AnnotationStatedAt
 	}
 	return ""
+}
+
+func (x *ContactsRecord) GetGivenName() string {
+	if x != nil && x.GivenName != nil {
+		return *x.GivenName
+	}
+	return ""
+}
+
+func (x *ContactsRecord) GetMiddleName() string {
+	if x != nil && x.MiddleName != nil {
+		return *x.MiddleName
+	}
+	return ""
+}
+
+func (x *ContactsRecord) GetFamilyName() string {
+	if x != nil && x.FamilyName != nil {
+		return *x.FamilyName
+	}
+	return ""
+}
+
+func (x *ContactsRecord) GetPreviousFamilyName() string {
+	if x != nil && x.PreviousFamilyName != nil {
+		return *x.PreviousFamilyName
+	}
+	return ""
+}
+
+func (x *ContactsRecord) GetNamePrefix() string {
+	if x != nil && x.NamePrefix != nil {
+		return *x.NamePrefix
+	}
+	return ""
+}
+
+func (x *ContactsRecord) GetNameSuffix() string {
+	if x != nil && x.NameSuffix != nil {
+		return *x.NameSuffix
+	}
+	return ""
+}
+
+func (x *ContactsRecord) GetNickname() string {
+	if x != nil && x.Nickname != nil {
+		return *x.Nickname
+	}
+	return ""
+}
+
+func (x *ContactsRecord) GetPhoneticGivenName() string {
+	if x != nil && x.PhoneticGivenName != nil {
+		return *x.PhoneticGivenName
+	}
+	return ""
+}
+
+func (x *ContactsRecord) GetPhoneticMiddleName() string {
+	if x != nil && x.PhoneticMiddleName != nil {
+		return *x.PhoneticMiddleName
+	}
+	return ""
+}
+
+func (x *ContactsRecord) GetPhoneticFamilyName() string {
+	if x != nil && x.PhoneticFamilyName != nil {
+		return *x.PhoneticFamilyName
+	}
+	return ""
+}
+
+func (x *ContactsRecord) GetPhoneticOrganizationName() string {
+	if x != nil && x.PhoneticOrganizationName != nil {
+		return *x.PhoneticOrganizationName
+	}
+	return ""
+}
+
+func (x *ContactsRecord) GetOrganizationName() string {
+	if x != nil && x.OrganizationName != nil {
+		return *x.OrganizationName
+	}
+	return ""
+}
+
+func (x *ContactsRecord) GetDepartmentName() string {
+	if x != nil && x.DepartmentName != nil {
+		return *x.DepartmentName
+	}
+	return ""
+}
+
+func (x *ContactsRecord) GetJobTitle() string {
+	if x != nil && x.JobTitle != nil {
+		return *x.JobTitle
+	}
+	return ""
+}
+
+func (x *ContactsRecord) GetBirthday() string {
+	if x != nil && x.Birthday != nil {
+		return *x.Birthday
+	}
+	return ""
+}
+
+func (x *ContactsRecord) GetNote() string {
+	if x != nil && x.Note != nil {
+		return *x.Note
+	}
+	return ""
+}
+
+func (x *ContactsRecord) GetUrlAddresses() []*ContactValue {
+	if x != nil {
+		return x.UrlAddresses
+	}
+	return nil
+}
+
+func (x *ContactsRecord) GetSocialProfiles() []*ContactValue {
+	if x != nil {
+		return x.SocialProfiles
+	}
+	return nil
+}
+
+func (x *ContactsRecord) GetInstantMessageAddresses() []*ContactValue {
+	if x != nil {
+		return x.InstantMessageAddresses
+	}
+	return nil
+}
+
+func (x *ContactsRecord) GetDates() []*ContactValue {
+	if x != nil {
+		return x.Dates
+	}
+	return nil
+}
+
+func (x *ContactsRecord) GetContactRelations() []*ContactValue {
+	if x != nil {
+		return x.ContactRelations
+	}
+	return nil
 }
 
 type ContactValue struct {
@@ -253,7 +423,7 @@ var File_trawl_source_contacts_open_v1_open_proto protoreflect.FileDescriptor
 
 const file_trawl_source_contacts_open_v1_open_proto_rawDesc = "" +
 	"\n" +
-	"(trawl/source/contacts/open/v1/open.proto\x12\x1dtrawl.source.contacts.open.v1\"\xaa\x05\n" +
+	"(trawl/source/contacts/open/v1/open.proto\x12\x1dtrawl.source.contacts.open.v1\"\xba\x10\n" +
 	"\x0eContactsRecord\x12\x10\n" +
 	"\x03ref\x18\x01 \x01(\tR\x03ref\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -268,14 +438,58 @@ const file_trawl_source_contacts_open_v1_open_proto_rawDesc = "" +
 	"annotation\x18\n" +
 	" \x01(\tH\x01R\n" +
 	"annotation\x88\x01\x01\x125\n" +
-	"\x14annotation_stated_at\x18\v \x01(\tH\x02R\x12annotationStatedAt\x88\x01\x01\x1aj\n" +
+	"\x14annotation_stated_at\x18\v \x01(\tH\x02R\x12annotationStatedAt\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"given_name\x18\f \x01(\tH\x03R\tgivenName\x88\x01\x01\x12$\n" +
+	"\vmiddle_name\x18\r \x01(\tH\x04R\n" +
+	"middleName\x88\x01\x01\x12$\n" +
+	"\vfamily_name\x18\x0e \x01(\tH\x05R\n" +
+	"familyName\x88\x01\x01\x125\n" +
+	"\x14previous_family_name\x18\x0f \x01(\tH\x06R\x12previousFamilyName\x88\x01\x01\x12$\n" +
+	"\vname_prefix\x18\x10 \x01(\tH\aR\n" +
+	"namePrefix\x88\x01\x01\x12$\n" +
+	"\vname_suffix\x18\x11 \x01(\tH\bR\n" +
+	"nameSuffix\x88\x01\x01\x12\x1f\n" +
+	"\bnickname\x18\x12 \x01(\tH\tR\bnickname\x88\x01\x01\x123\n" +
+	"\x13phonetic_given_name\x18\x13 \x01(\tH\n" +
+	"R\x11phoneticGivenName\x88\x01\x01\x125\n" +
+	"\x14phonetic_middle_name\x18\x14 \x01(\tH\vR\x12phoneticMiddleName\x88\x01\x01\x125\n" +
+	"\x14phonetic_family_name\x18\x15 \x01(\tH\fR\x12phoneticFamilyName\x88\x01\x01\x12A\n" +
+	"\x1aphonetic_organization_name\x18\x16 \x01(\tH\rR\x18phoneticOrganizationName\x88\x01\x01\x120\n" +
+	"\x11organization_name\x18\x17 \x01(\tH\x0eR\x10organizationName\x88\x01\x01\x12,\n" +
+	"\x0fdepartment_name\x18\x18 \x01(\tH\x0fR\x0edepartmentName\x88\x01\x01\x12 \n" +
+	"\tjob_title\x18\x19 \x01(\tH\x10R\bjobTitle\x88\x01\x01\x12\x1f\n" +
+	"\bbirthday\x18\x1a \x01(\tH\x11R\bbirthday\x88\x01\x01\x12\x17\n" +
+	"\x04note\x18\x1b \x01(\tH\x12R\x04note\x88\x01\x01\x12P\n" +
+	"\rurl_addresses\x18\x1c \x03(\v2+.trawl.source.contacts.open.v1.ContactValueR\furlAddresses\x12T\n" +
+	"\x0fsocial_profiles\x18\x1d \x03(\v2+.trawl.source.contacts.open.v1.ContactValueR\x0esocialProfiles\x12g\n" +
+	"\x19instant_message_addresses\x18\x1e \x03(\v2+.trawl.source.contacts.open.v1.ContactValueR\x17instantMessageAddresses\x12A\n" +
+	"\x05dates\x18\x1f \x03(\v2+.trawl.source.contacts.open.v1.ContactValueR\x05dates\x12X\n" +
+	"\x11contact_relations\x18  \x03(\v2+.trawl.source.contacts.open.v1.ContactValueR\x10contactRelations\x1aj\n" +
 	"\rAccountsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12C\n" +
 	"\x05value\x18\x02 \x01(\v2-.trawl.source.contacts.open.v1.IdentifierListR\x05value:\x028\x01B\f\n" +
 	"\n" +
 	"_sort_nameB\r\n" +
 	"\v_annotationB\x17\n" +
-	"\x15_annotation_stated_at\"t\n" +
+	"\x15_annotation_stated_atB\r\n" +
+	"\v_given_nameB\x0e\n" +
+	"\f_middle_nameB\x0e\n" +
+	"\f_family_nameB\x17\n" +
+	"\x15_previous_family_nameB\x0e\n" +
+	"\f_name_prefixB\x0e\n" +
+	"\f_name_suffixB\v\n" +
+	"\t_nicknameB\x16\n" +
+	"\x14_phonetic_given_nameB\x17\n" +
+	"\x15_phonetic_middle_nameB\x17\n" +
+	"\x15_phonetic_family_nameB\x1d\n" +
+	"\x1b_phonetic_organization_nameB\x14\n" +
+	"\x12_organization_nameB\x12\n" +
+	"\x10_department_nameB\f\n" +
+	"\n" +
+	"_job_titleB\v\n" +
+	"\t_birthdayB\a\n" +
+	"\x05_note\"t\n" +
 	"\fContactValue\x12\x14\n" +
 	"\x05value\x18\x01 \x01(\tR\x05value\x12\x19\n" +
 	"\x05label\x18\x02 \x01(\tH\x00R\x05label\x88\x01\x01\x12\x1d\n" +
@@ -306,16 +520,21 @@ var file_trawl_source_contacts_open_v1_open_proto_goTypes = []any{
 	nil,                    // 3: trawl.source.contacts.open.v1.ContactsRecord.AccountsEntry
 }
 var file_trawl_source_contacts_open_v1_open_proto_depIdxs = []int32{
-	1, // 0: trawl.source.contacts.open.v1.ContactsRecord.emails:type_name -> trawl.source.contacts.open.v1.ContactValue
-	1, // 1: trawl.source.contacts.open.v1.ContactsRecord.phones:type_name -> trawl.source.contacts.open.v1.ContactValue
-	1, // 2: trawl.source.contacts.open.v1.ContactsRecord.addresses:type_name -> trawl.source.contacts.open.v1.ContactValue
-	3, // 3: trawl.source.contacts.open.v1.ContactsRecord.accounts:type_name -> trawl.source.contacts.open.v1.ContactsRecord.AccountsEntry
-	2, // 4: trawl.source.contacts.open.v1.ContactsRecord.AccountsEntry.value:type_name -> trawl.source.contacts.open.v1.IdentifierList
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	1,  // 0: trawl.source.contacts.open.v1.ContactsRecord.emails:type_name -> trawl.source.contacts.open.v1.ContactValue
+	1,  // 1: trawl.source.contacts.open.v1.ContactsRecord.phones:type_name -> trawl.source.contacts.open.v1.ContactValue
+	1,  // 2: trawl.source.contacts.open.v1.ContactsRecord.addresses:type_name -> trawl.source.contacts.open.v1.ContactValue
+	3,  // 3: trawl.source.contacts.open.v1.ContactsRecord.accounts:type_name -> trawl.source.contacts.open.v1.ContactsRecord.AccountsEntry
+	1,  // 4: trawl.source.contacts.open.v1.ContactsRecord.url_addresses:type_name -> trawl.source.contacts.open.v1.ContactValue
+	1,  // 5: trawl.source.contacts.open.v1.ContactsRecord.social_profiles:type_name -> trawl.source.contacts.open.v1.ContactValue
+	1,  // 6: trawl.source.contacts.open.v1.ContactsRecord.instant_message_addresses:type_name -> trawl.source.contacts.open.v1.ContactValue
+	1,  // 7: trawl.source.contacts.open.v1.ContactsRecord.dates:type_name -> trawl.source.contacts.open.v1.ContactValue
+	1,  // 8: trawl.source.contacts.open.v1.ContactsRecord.contact_relations:type_name -> trawl.source.contacts.open.v1.ContactValue
+	2,  // 9: trawl.source.contacts.open.v1.ContactsRecord.AccountsEntry.value:type_name -> trawl.source.contacts.open.v1.IdentifierList
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_trawl_source_contacts_open_v1_open_proto_init() }

@@ -29,6 +29,27 @@ func sourceValues(values []model.ContactValue, source string, normalize func(str
 	return out
 }
 
+func sourceLabeledValues(values []model.ContactValue, source string, normalize func(string) string) []model.ContactValue {
+	out := make([]model.ContactValue, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		key := labeledValueKey(value, normalize)
+		if key == "" || seen[key] {
+			continue
+		}
+		value.Source = source
+		if value.Label == "" {
+			value.Label = "other"
+		}
+		if len(out) == 0 {
+			value.Primary = true
+		}
+		out = append(out, value)
+		seen[key] = true
+	}
+	return out
+}
+
 func mergeAccounts(existing map[string][]string, incoming map[string][]string) map[string][]string {
 	if len(incoming) == 0 {
 		return existing

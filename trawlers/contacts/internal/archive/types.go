@@ -9,9 +9,12 @@ import (
 )
 
 const (
-	AppID         = "contacts"
-	DisplayName   = "Contacts"
-	SchemaVersion = 2
+	AppID       = "contacts"
+	DisplayName = "Contacts"
+	// SchemaVersion 3 stores the full contact card: the card columns on people
+	// and the card value kinds in contact_values.
+	SchemaVersion     = 3
+	cardSchemaVersion = 3
 )
 
 type Store struct {
