@@ -22,6 +22,7 @@ import (
 	imessages "github.com/opentrawl/opentrawl/trawlers/imessage/internal/messages"
 	"github.com/opentrawl/opentrawl/trawlkit"
 	ckoutput "github.com/opentrawl/opentrawl/trawlkit/output"
+	"github.com/opentrawl/opentrawl/trawlkit/shortref"
 	ckstore "github.com/opentrawl/opentrawl/trawlkit/store"
 	"google.golang.org/protobuf/proto"
 
@@ -534,6 +535,207 @@ func TestChatsDegradesHonestlyWithoutReadStateColumn(t *testing.T) {
 	}
 }
 
+// A sync replaces every source-derived table in the archive. Short refs are a
+// published citation contract, so the index must outlive that replacement: an
+// alias issued by an earlier sync keeps naming the same record after the
+// source rows are rewritten in a different order, gain new rows and lose old
+// ones. The alias of a deleted record survives too, so citing it reports not
+// found instead of quietly landing on somebody else's message.
+func TestShortRefsSurviveFullArchiveReplacement(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	sourcePath := filepath.Join(home, "Library", "Messages", "chat.db")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	paths := trawlkit.Paths{
+		Archive: filepath.Join(home, ".opentrawl", appID, appID+".db"),
+		Config:  filepath.Join(home, ".opentrawl", appID, "config.toml"),
+		Logs:    filepath.Join(home, ".opentrawl", appID, "logs"),
+	}
+	source := New()
+
+	createMessagesSource(t, sourcePath, identityFixtureInserts())
+	withWriteRequest(t, ctx, paths, func(req *trawlkit.Request) error {
+		_, err := source.Sync(ctx, req)
+		return err
+	})
+	// An alias an earlier archive generation issued to a record the source no
+	// longer holds. It occupies the shortest alias of message three, so
+	// assignment must extend that one rather than move this one.
+	extendedRef := archive.MessageRef("3")
+	squattedAlias := shortref.Alias(extendedRef, shortref.MinLength)
+	withWriteRequest(t, ctx, paths, func(req *trawlkit.Request) error {
+		_, err := req.Store.DB().ExecContext(ctx,
+			`insert into short_refs(alias, full_ref, canonical_ref) values (?, ?, ?)`,
+			squattedAlias, retiredIdentityRef, retiredIdentityRef)
+		return err
+	})
+	assignShortRefs(t, ctx, source, paths)
+
+	deletedRef := archive.MessageRef("2")
+	issuedRefs := []string{
+		archive.MessageRef("1"),
+		deletedRef,
+		extendedRef,
+		archive.ChatRef("1"),
+		archive.ChatRef("2"),
+	}
+	issued := shortRefAliasesFor(t, ctx, paths, issuedRefs)
+	for _, ref := range issuedRefs {
+		if issued[ref] == "" {
+			t.Fatalf("first sync issued no alias for %q: %#v", ref, issued)
+		}
+	}
+	if issued[extendedRef] == squattedAlias || !strings.HasPrefix(issued[extendedRef], squattedAlias) {
+		t.Fatalf("collided alias = %q, want an extension of %q", issued[extendedRef], squattedAlias)
+	}
+
+	// Second sync: the same records written in a different order, one record
+	// deleted and three added.
+	createMessagesSource(t, sourcePath, churnedIdentityFixtureInserts())
+	withWriteRequest(t, ctx, paths, func(req *trawlkit.Request) error {
+		_, err := source.Sync(ctx, req)
+		return err
+	})
+	assignShortRefs(t, ctx, source, paths)
+
+	resynced := shortRefAliasesFor(t, ctx, paths, issuedRefs)
+	for _, ref := range issuedRefs {
+		if resynced[ref] != issued[ref] {
+			t.Fatalf("alias for %q changed across replacement: got %q want %q", ref, resynced[ref], issued[ref])
+		}
+		assertShortRefResolvesTo(t, ctx, paths, issued[ref], ref)
+	}
+
+	// New records get aliases of their own; none of them may take an alias a
+	// reader has already been given.
+	addedRefs := []string{archive.MessageRef("4"), archive.MessageRef("5"), archive.ChatRef("3")}
+	added := shortRefAliasesFor(t, ctx, paths, addedRefs)
+	for _, ref := range addedRefs {
+		if added[ref] == "" {
+			t.Fatalf("second sync issued no alias for new ref %q: %#v", ref, added)
+		}
+		assertShortRefResolvesTo(t, ctx, paths, added[ref], ref)
+	}
+
+	// The deleted record's alias still names it, and opening it says so.
+	readStore := openReadStore(t, ctx, paths.Archive)
+	_, err := source.OpenRecord(ctx, &trawlkit.Request{Store: readStore, Paths: paths}, issued[deletedRef])
+	_ = readStore.Close()
+	var missing commandError
+	if !errors.As(err, &missing) || missing.name != "not_found" {
+		t.Fatalf("open alias of deleted record = %#v, want not_found", err)
+	}
+}
+
+// retiredIdentityRef stands for a message an earlier sync indexed and a later
+// source no longer holds. It never appears in a fixture, only in the index.
+const retiredIdentityRef = "imessage:msg/9001"
+
+func withWriteRequest(t *testing.T, ctx context.Context, paths trawlkit.Paths, fn func(*trawlkit.Request) error) {
+	t.Helper()
+	writeStore, err := ckstore.Open(ctx, ckstore.Options{Path: paths.Archive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fnErr := fn(&trawlkit.Request{
+		Store:    writeStore,
+		Paths:    paths,
+		Format:   ckoutput.Text,
+		Out:      &bytes.Buffer{},
+		Progress: func(trawlkit.Progress) {},
+	})
+	if closeErr := writeStore.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if fnErr != nil {
+		t.Fatal(fnErr)
+	}
+}
+
+func assignShortRefs(t *testing.T, ctx context.Context, source *Crawler, paths trawlkit.Paths) {
+	t.Helper()
+	withWriteRequest(t, ctx, paths, func(req *trawlkit.Request) error {
+		records, err := source.ShortRefRecords(ctx, req)
+		if err != nil {
+			return err
+		}
+		_, err = req.AssignShortRefs(ctx, records)
+		return err
+	})
+}
+
+func shortRefAliasesFor(t *testing.T, ctx context.Context, paths trawlkit.Paths, refs []string) map[string]string {
+	t.Helper()
+	readStore := openReadStore(t, ctx, paths.Archive)
+	defer func() { _ = readStore.Close() }()
+	aliases, err := readRequest(readStore, paths).ShortRefAliases(ctx, refs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return aliases
+}
+
+func assertShortRefResolvesTo(t *testing.T, ctx context.Context, paths trawlkit.Paths, alias, want string) {
+	t.Helper()
+	readStore := openReadStore(t, ctx, paths.Archive)
+	defer func() { _ = readStore.Close() }()
+	resolved, err := readRequest(readStore, paths).ResolveShortRef(ctx, alias)
+	if err != nil {
+		t.Fatalf("resolve %q: %v", alias, err)
+	}
+	if len(resolved) != 1 || resolved[0] != want {
+		t.Fatalf("resolve %q = %#v, want %q", alias, resolved, want)
+	}
+}
+
+// identityFixtureInserts is a small synthetic source: two chats, two handles
+// and three messages. It carries no search or read-state shape, because the
+// identity tests only care about which records exist and what they are called.
+func identityFixtureInserts() []string {
+	return []string{
+		`insert into handle(rowid, id, service, uncanonicalized_id) values (1, '+15550110', 'iMessage', '')`,
+		`insert into handle(rowid, id, service, uncanonicalized_id) values (2, 'first@example.com', 'iMessage', '')`,
+		`insert into chat(rowid, guid, display_name, chat_identifier, service_name, room_name, is_archived) values (1, 'identity-chat-one', 'Sam Fixture', '+15550110', 'iMessage', '', 0)`,
+		`insert into chat(rowid, guid, display_name, chat_identifier, service_name, room_name, is_archived) values (2, 'identity-chat-two', 'Robin Fixture', 'first@example.com', 'iMessage', '', 0)`,
+		`insert into chat_handle_join(chat_id, handle_id) values (1, 1)`,
+		`insert into chat_handle_join(chat_id, handle_id) values (2, 2)`,
+		`insert into message(rowid, guid, handle_id, date, service, is_from_me, text, attributedBody, is_read) values (1, 'identity-message-one', 1, 100, 'iMessage', 0, 'first synthetic message', null, 1)`,
+		`insert into message(rowid, guid, handle_id, date, service, is_from_me, text, attributedBody, is_read) values (2, 'identity-message-two', 1, 200, 'iMessage', 0, 'second synthetic message', null, 1)`,
+		`insert into message(rowid, guid, handle_id, date, service, is_from_me, text, attributedBody, is_read) values (3, 'identity-message-three', 2, 300, 'iMessage', 0, 'third synthetic message', null, 1)`,
+		`insert into chat_message_join(chat_id, message_id) values (1, 1)`,
+		`insert into chat_message_join(chat_id, message_id) values (1, 2)`,
+		`insert into chat_message_join(chat_id, message_id) values (2, 3)`,
+	}
+}
+
+// churnedIdentityFixtureInserts is the same source after ordinary use: the
+// surviving records keep their identity but are written in a different order,
+// message two is gone, and a chat, a handle and two messages are new.
+func churnedIdentityFixtureInserts() []string {
+	return []string{
+		`insert into chat(rowid, guid, display_name, chat_identifier, service_name, room_name, is_archived) values (2, 'identity-chat-two', 'Robin Fixture', 'first@example.com', 'iMessage', '', 0)`,
+		`insert into chat(rowid, guid, display_name, chat_identifier, service_name, room_name, is_archived) values (3, 'identity-chat-three', 'Alex Fixture', '+15550111', 'iMessage', '', 0)`,
+		`insert into chat(rowid, guid, display_name, chat_identifier, service_name, room_name, is_archived) values (1, 'identity-chat-one', 'Sam Fixture', '+15550110', 'iMessage', '', 0)`,
+		`insert into handle(rowid, id, service, uncanonicalized_id) values (3, '+15550111', 'iMessage', '')`,
+		`insert into handle(rowid, id, service, uncanonicalized_id) values (2, 'first@example.com', 'iMessage', '')`,
+		`insert into handle(rowid, id, service, uncanonicalized_id) values (1, '+15550110', 'iMessage', '')`,
+		`insert into chat_handle_join(chat_id, handle_id) values (3, 3)`,
+		`insert into chat_handle_join(chat_id, handle_id) values (2, 2)`,
+		`insert into chat_handle_join(chat_id, handle_id) values (1, 1)`,
+		`insert into message(rowid, guid, handle_id, date, service, is_from_me, text, attributedBody, is_read) values (3, 'identity-message-three', 2, 300, 'iMessage', 0, 'third synthetic message', null, 1)`,
+		`insert into message(rowid, guid, handle_id, date, service, is_from_me, text, attributedBody, is_read) values (5, 'identity-message-five', 3, 500, 'iMessage', 0, 'fifth synthetic message', null, 0)`,
+		`insert into message(rowid, guid, handle_id, date, service, is_from_me, text, attributedBody, is_read) values (1, 'identity-message-one', 1, 100, 'iMessage', 0, 'first synthetic message', null, 1)`,
+		`insert into message(rowid, guid, handle_id, date, service, is_from_me, text, attributedBody, is_read) values (4, 'identity-message-four', 3, 400, 'iMessage', 0, 'fourth synthetic message', null, 0)`,
+		`insert into chat_message_join(chat_id, message_id) values (3, 5)`,
+		`insert into chat_message_join(chat_id, message_id) values (2, 3)`,
+		`insert into chat_message_join(chat_id, message_id) values (1, 1)`,
+		`insert into chat_message_join(chat_id, message_id) values (3, 4)`,
+	}
+}
+
 func runImessageMessages(t *testing.T, ctx context.Context, source *Crawler, readStore *ckstore.Store, paths trawlkit.Paths, chat string) string {
 	t.Helper()
 	fs := flag.NewFlagSet("messages", flag.ContinueOnError)
@@ -628,25 +830,40 @@ func openReadStore(t *testing.T, ctx context.Context, path string) *ckstore.Stor
 	return st
 }
 
-func createMessagesFixture(t *testing.T, path string) {
+// messagesSourceSchema is the subset of the Apple Messages schema the crawler
+// reads. Fixtures create it and then insert their own synthetic rows.
+var messagesSourceSchema = []string{
+	`create table handle (ROWID integer primary key, id text not null, service text not null, uncanonicalized_id text)`,
+	`create table chat (ROWID integer primary key, guid text not null, display_name text, chat_identifier text, service_name text, room_name text, is_archived integer)`,
+	`create table chat_handle_join (chat_id integer, handle_id integer)`,
+	`create table message (ROWID integer primary key, guid text not null, handle_id integer, date integer, service text, is_from_me integer, text text, attributedBody blob, is_read integer default 0, date_read integer default 0)`,
+	`create table chat_message_join (chat_id integer, message_id integer)`,
+	`create table message_attachment_join (message_id integer, attachment_id integer)`,
+}
+
+// createMessagesSource writes a fresh synthetic Messages database at path,
+// replacing any file already there, and applies inserts in the given order.
+func createMessagesSource(t *testing.T, path string, inserts []string) {
 	t.Helper()
-	longLaunchNote := "latest launch note with candles budget and tariffs. " + strings.Repeat("This sentence keeps going so transcript output must stay whole. ", 3) + "full tail marker"
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
 	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	schema := []string{
-		`create table handle (ROWID integer primary key, id text not null, service text not null, uncanonicalized_id text)`,
-		`create table chat (ROWID integer primary key, guid text not null, display_name text, chat_identifier text, service_name text, room_name text, is_archived integer)`,
-		`create table chat_handle_join (chat_id integer, handle_id integer)`,
-		`create table message (ROWID integer primary key, guid text not null, handle_id integer, date integer, service text, is_from_me integer, text text, attributedBody blob, is_read integer default 0, date_read integer default 0)`,
-		`create table chat_message_join (chat_id integer, message_id integer)`,
-		`create table message_attachment_join (message_id integer, attachment_id integer)`,
-	}
-	for _, stmt := range schema {
+	for _, stmt := range messagesSourceSchema {
 		mustExec(t, db, stmt)
 	}
+	for _, stmt := range inserts {
+		mustExec(t, db, stmt)
+	}
+}
+
+func createMessagesFixture(t *testing.T, path string) {
+	t.Helper()
+	longLaunchNote := "latest launch note with candles budget and tariffs. " + strings.Repeat("This sentence keeps going so transcript output must stay whole. ", 3) + "full tail marker"
 	inserts := []string{
 		`insert into handle(rowid, id, service, uncanonicalized_id) values (1, '+15550100', 'iMessage', '')`,
 		`insert into handle(rowid, id, service, uncanonicalized_id) values (2, '0015550100', 'SMS', '')`,
@@ -684,9 +901,7 @@ func createMessagesFixture(t *testing.T, path string) {
 		`insert into chat_message_join(chat_id, message_id) values (4, 5)`,
 		`insert into message_attachment_join(message_id, attachment_id) values (4, 42)`,
 	}
-	for _, stmt := range inserts {
-		mustExec(t, db, stmt)
-	}
+	createMessagesSource(t, path, inserts)
 }
 
 func mustExec(t *testing.T, db *sql.DB, query string, args ...any) {

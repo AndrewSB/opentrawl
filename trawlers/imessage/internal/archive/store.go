@@ -272,7 +272,11 @@ func (s *Store) ReplaceAll(ctx context.Context, data messages.ArchiveData, conta
 		if err := shortref.EnsureSchema(ctx, tx); err != nil {
 			return err
 		}
-		for _, table := range []string{"short_refs", "messages_fts", "messages", "chat_messages", "chat_participants", "chats", "handles", "contact_mappings", "owner_handles", "sync_state"} {
+		// short_refs is deliberately absent: aliases are a published citation
+		// contract, so they outlive the source-derived rows they name. The
+		// assign-only path in trawlkit extends the index after this
+		// replacement and never re-issues an alias to another ref.
+		for _, table := range []string{"messages_fts", "messages", "chat_messages", "chat_participants", "chats", "handles", "contact_mappings", "owner_handles", "sync_state"} {
 			if _, err := tx.ExecContext(ctx, "delete from "+table); err != nil {
 				return err
 			}
