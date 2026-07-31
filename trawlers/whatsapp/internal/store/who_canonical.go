@@ -27,7 +27,7 @@ func (s *Store) withCanonicalSenderNames(ctx context.Context, messages []Message
 type canonicalSenderNames map[string]string
 
 func (s *Store) canonicalSenderNames(ctx context.Context) (canonicalSenderNames, error) {
-	records, err := s.whoCandidateRecordsWithoutNameMerge(ctx)
+	records, err := s.whoCandidateNameRecords(ctx)
 	if err != nil {
 		return nil, err
 	}

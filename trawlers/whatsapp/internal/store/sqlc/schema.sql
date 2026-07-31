@@ -63,6 +63,7 @@ create table messages (
 	starred integer not null default 0
 );
 
+create index idx_contacts_lid on contacts(lid);
 create index idx_messages_chat_ts on messages(chat_jid, ts);
 create index idx_messages_chat_msg on messages(chat_jid, msg_id);
 create index idx_messages_ts on messages(ts);
