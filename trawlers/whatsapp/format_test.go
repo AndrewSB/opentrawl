@@ -59,6 +59,46 @@ func TestSearchUsesKnownParticipantBeforeOpaqueChatID(t *testing.T) {
 	}
 }
 
+// Search evidence must never be an empty run — federation rejects one and the
+// whole source's page fails with it. Every snippet path ends in
+// readableMessageType, which names even a row with no text, no media and no
+// recognisable type ("[text]" for raw type zero), so a date-window search over
+// such a row still carries a renderable run. This pins that property.
+func TestSearchRendersMessageWithNoTextAndNoMedia(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "whatsapp.db")
+	backing, err := ckstore.Open(ctx, ckstore.Options{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = backing.Close() }()
+	archive, err := store.Use(ctx, backing, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := archive.ReplaceAll(ctx, store.ImportStats{}, nil, nil, nil, nil, []store.Message{{
+		SourcePK:   1,
+		ChatJID:    "15550100@s.whatsapp.net",
+		ChatName:   "Avery Example",
+		MessageID:  "synthetic-empty-message",
+		SenderName: "Avery Example",
+		Timestamp:  time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := New().Search(ctx, &trawlkit.Request{Store: backing, Paths: trawlkit.Paths{Archive: path}, Format: output.JSON}, trawlkit.Query{Limit: 5, After: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Results) != 1 {
+		t.Fatalf("search result = %#v, want the empty message", result.Results)
+	}
+	evidence := result.Results[0].Evidence
+	if len(evidence) != 1 || evidence[0].Text == nil || len(evidence[0].Text.Runs) != 1 || evidence[0].Text.Runs[0].Text != "[text]" {
+		t.Fatalf("search evidence runs = %#v, want one non-empty [text] run", evidence)
+	}
+}
+
 func TestResolvedParticipantNamesDropOpaqueValues(t *testing.T) {
 	participants := []string{
 		"118390991671363@lid",

@@ -267,6 +267,30 @@ func TestSharedShortRefsRoundTrip(t *testing.T) {
 	}
 }
 
+// An archive import keeps a post whose dump row carries no text, and the
+// author columns stay searchable, so a hit can arrive with an empty snippet.
+// Search evidence must never be an empty run — federation rejects one and the
+// whole source's page fails with it — so such a post renders as "(no text)".
+func TestSearchHitsRenderPostWithoutText(t *testing.T) {
+	hits := searchHits([]store.SearchResult{{
+		Tweet: store.Tweet{
+			ID:           "1001",
+			CreatedAt:    time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
+			AuthorID:     "9001",
+			AuthorHandle: "caseyexample",
+			AuthorName:   "Casey Example",
+		},
+		Who: "Casey Example",
+	}}, "9001")
+	if len(hits) != 1 || len(hits[0].Evidence) < 1 {
+		t.Fatalf("search hits = %#v", hits)
+	}
+	text := hits[0].Evidence[0].Text
+	if text == nil || len(text.Runs) != 1 || text.Runs[0].Text != "(no text)" {
+		t.Fatalf("search evidence = %#v, want one (no text) run", hits[0].Evidence)
+	}
+}
+
 func TestDirectVersionVerbRejected(t *testing.T) {
 	result := runTwitterRaw(t, stateRootForRun(t), "version")
 	if result.code != 2 {

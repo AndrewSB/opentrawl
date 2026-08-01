@@ -350,6 +350,82 @@ func TestCrawlerSyncSearchOpenAndContacts(t *testing.T) {
 	}
 }
 
+// A message can hold no text and no attachment (a reaction shell, an
+// edited-away body). Search evidence must never be an empty run — federation
+// rejects one and the whole source's page fails with it — so such a message
+// renders as "(no content)".
+func TestSearchRendersMessageWithNoTextAndNoAttachment(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	sourcePath := filepath.Join(home, "Library", "Messages", "chat.db")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	createMessagesSource(t, sourcePath, []string{
+		`insert into handle(rowid, id, service, uncanonicalized_id) values (1, '+15550100', 'iMessage', '')`,
+		`insert into chat(rowid, guid, display_name, chat_identifier, service_name, room_name, is_archived) values (1, 'chat-one', 'Fixture Person', '+15550100', 'iMessage', '', 0)`,
+		`insert into chat_handle_join(chat_id, handle_id) values (1, 1)`,
+		`insert into message(rowid, guid, handle_id, date, service, is_from_me, text, attributedBody, is_read) values (1, 'message-one', 1, 100, 'iMessage', 0, 'synthetic hello', null, 1)`,
+		`insert into message(rowid, guid, handle_id, date, service, is_from_me, text, attributedBody, is_read) values (2, 'message-two', 1, 200, 'iMessage', 0, null, null, 1)`,
+		`insert into chat_message_join(chat_id, message_id) values (1, 1)`,
+		`insert into chat_message_join(chat_id, message_id) values (1, 2)`,
+	})
+
+	stateRoot := filepath.Join(home, ".opentrawl")
+	paths := trawlkit.Paths{
+		Archive: filepath.Join(stateRoot, appID, appID+".db"),
+		Config:  filepath.Join(stateRoot, appID, "config.toml"),
+		Logs:    filepath.Join(stateRoot, appID, "logs"),
+	}
+	source := New()
+	writeStore, err := ckstore.Open(ctx, ckstore.Options{Path: paths.Archive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	syncReq := &trawlkit.Request{
+		Store:    writeStore,
+		Paths:    paths,
+		Format:   ckoutput.Text,
+		Out:      &bytes.Buffer{},
+		Progress: func(trawlkit.Progress) {},
+	}
+	_, err = source.Sync(ctx, syncReq)
+	if closeErr := writeStore.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	readStore := openReadStore(t, ctx, paths.Archive)
+	search, err := source.Search(ctx, readRequest(readStore, paths), trawlkit.Query{Limit: 20, After: time.Date(2000, 12, 31, 0, 0, 0, 0, time.UTC)})
+	_ = readStore.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(search.Results) != 2 {
+		t.Fatalf("search = %#v, want both messages", search)
+	}
+	texts := map[string]string{}
+	for _, hit := range search.Results {
+		if len(hit.Evidence) != 1 || hit.Evidence[0].Text == nil || len(hit.Evidence[0].Text.Runs) != 1 {
+			t.Fatalf("search evidence = %#v", hit.Evidence)
+		}
+		run := hit.Evidence[0].Text.Runs[0]
+		if run.Text == "" {
+			t.Fatalf("hit %s carries an empty evidence run federation would reject", hit.Ref)
+		}
+		texts[hit.Ref] = run.Text
+	}
+	if texts[archive.MessageRef("1")] != "synthetic hello" {
+		t.Fatalf("text message evidence = %q", texts[archive.MessageRef("1")])
+	}
+	if texts[archive.MessageRef("2")] != "(no content)" {
+		t.Fatalf("empty message evidence = %q, want (no content)", texts[archive.MessageRef("2")])
+	}
+}
+
 func TestChatsListsConversationsWithReadState(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()

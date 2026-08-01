@@ -41,7 +41,14 @@ func searchHits(results []store.SearchResult, ownerAuthorID string) []trawlkit.H
 		if strings.TrimSpace(who) == "" {
 			who = "Post"
 		}
-		evidence := []trawlkit.EvidenceFragment{trawlkit.TextMatch("Post text", result.Snippet)}
+		// An archive import keeps a post whose dump row carries no text, and
+		// its author columns are still searchable, so a hit can arrive with
+		// an empty snippet. Search evidence must never be an empty run.
+		snippet := result.Snippet
+		if strings.TrimSpace(snippet) == "" {
+			snippet = "(no text)"
+		}
+		evidence := []trawlkit.EvidenceFragment{trawlkit.TextMatch("Post text", snippet)}
 		if strings.TrimSpace(result.InReplyTo) != "" {
 			evidence = append(evidence, trawlkit.RelationMatch("Replying to", "reply", result.InReplyTo))
 		}

@@ -96,7 +96,11 @@ func searchText(item archive.SearchResult) string {
 	if item.HasAttachments {
 		return "(attachment)"
 	}
-	return ""
+	// A message can carry no text and no attachment (a reaction shell, an
+	// edited-away body). That is a real archive fact, and search evidence
+	// must never be an empty run, so name it the way "(attachment)" names
+	// an attachment-only message.
+	return "(no content)"
 }
 
 func displayMessageText(text string, hasAttachments bool) string {
