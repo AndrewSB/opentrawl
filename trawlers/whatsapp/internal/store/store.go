@@ -83,19 +83,23 @@ type ImportStats struct {
 }
 
 type Status struct {
-	DBPath         string    `json:"db_path"`
-	Chats          int       `json:"chats"`
-	UnreadChats    int       `json:"unread_chats"`
-	UnreadMessages int       `json:"unread_messages"`
-	Contacts       int       `json:"contacts"`
-	Groups         int       `json:"groups"`
-	Participants   int       `json:"participants"`
-	Messages       int       `json:"messages"`
-	MediaMessages  int       `json:"media_messages"`
-	OldestMessage  time.Time `json:"oldest_message,omitzero"`
-	NewestMessage  time.Time `json:"newest_message,omitzero"`
-	LastImportAt   time.Time `json:"last_import_at,omitzero"`
-	LastSource     string    `json:"last_source,omitempty"`
+	DBPath         string `json:"db_path"`
+	Chats          int    `json:"chats"`
+	UnreadChats    int    `json:"unread_chats"`
+	UnreadMessages int    `json:"unread_messages"`
+	Contacts       int    `json:"contacts"`
+	Groups         int    `json:"groups"`
+	Participants   int    `json:"participants"`
+	Messages       int    `json:"messages"`
+	MediaMessages  int    `json:"media_messages"`
+	// DuplicateMessageRows counts rows the archive holds beyond the messages
+	// they name. The mirror keeps every row the source stored, so this is the
+	// difference between what the archive holds and what a reader can reach.
+	DuplicateMessageRows int       `json:"duplicate_message_rows"`
+	OldestMessage        time.Time `json:"oldest_message,omitzero"`
+	NewestMessage        time.Time `json:"newest_message,omitzero"`
+	LastImportAt         time.Time `json:"last_import_at,omitzero"`
+	LastSource           string    `json:"last_source,omitempty"`
 }
 
 type Chat struct {
