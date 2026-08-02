@@ -140,11 +140,12 @@ from messages m left join chats ch on ch.jid = m.chat_jid where 1=1`
 			query += " order by m.ts desc, m.source_pk desc"
 		}
 		query += " limit ?"
-		args = append(args, filter.Limit)
+		args = append(args, searchScanLimit(filter.Limit))
 		messages, err := scanSearchMessages(ctx, s.db, query, args...)
 		if err != nil {
 			return nil, err
 		}
+		messages = collapseToOneHitPerRef(messages, filter.Limit)
 		return s.withCanonicalWhatsAppMessageDisplayNames(ctx, messages)
 	}
 	ftsQuery, err := ckstore.FTS5TermsInTextAndMediaColumns(filter.Query)
@@ -159,12 +160,68 @@ from messages_fts f join messages m on m.rowid=f.rowid left join chats ch on ch.
 	query += " and not (" + providerNativeSystemMetadataMessageSQLPredicate + ")"
 	query, args = applyMessageFilters(query, args, filter, true)
 	query += " order by m.ts desc, m.source_pk desc limit ?"
-	args = append(args, filter.Limit)
+	// The page is fetched with a margin and collapsed to one hit per ref
+	// afterwards, so that dropping duplicate rows does not return a short page.
+	args = append(args, searchScanLimit(filter.Limit))
 	messages, err := scanSearchMessages(ctx, s.db, query, args...)
 	if err != nil {
 		return nil, err
 	}
+	messages = collapseToOneHitPerRef(messages, filter.Limit)
 	return s.withCanonicalWhatsAppMessageDisplayNames(ctx, messages)
+}
+
+// searchScanLimit asks for enough rows that collapsing duplicates still fills a
+// page. A page that came back short would read as a smaller result set than the
+// archive holds.
+func searchScanLimit(limit int) int {
+	if limit <= 0 {
+		return limit
+	}
+	return limit * 2
+}
+
+// collapseToOneHitPerRef returns one hit per canonical ref, keeping the copy
+// MessageByID would open.
+//
+// A ref is the machine-facing identity of one record and a hit is one match on
+// it, so a page naming the same ref twice would offer one record twice under
+// one name — which the federation layer rejects outright. The archive can still
+// hold several rows for that ref, because it mirrors a source that assigns its
+// own row keys and can store one message under two of them; deciding which of
+// the source's rows are real is not the mirror's decision to make.
+//
+// Which copy wins is not decided here: MessageByID resolves a ref to the newest
+// row by (timestamp, source key), and search agrees with it so that a hit and
+// the record it opens are never different copies. Rank order is preserved, so
+// collapsing does not reorder the page.
+func collapseToOneHitPerRef(messages []Message, limit int) []Message {
+	positionByRef := make(map[string]int, len(messages))
+	out := messages[:0]
+	for _, message := range messages {
+		at, seen := positionByRef[message.MessageID]
+		if !seen {
+			positionByRef[message.MessageID] = len(out)
+			out = append(out, message)
+			continue
+		}
+		if opensInsteadOf(message, out[at]) {
+			out[at] = message
+		}
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+// opensInsteadOf reports whether candidate is the copy MessageByID would
+// return: the newest by timestamp, and by source row key when timestamps match.
+func opensInsteadOf(candidate, kept Message) bool {
+	if !candidate.Timestamp.Equal(kept.Timestamp) {
+		return candidate.Timestamp.After(kept.Timestamp)
+	}
+	return candidate.SourcePK > kept.SourcePK
 }
 
 func scanSearchMessages(ctx context.Context, db *sql.DB, query string, args ...any) ([]Message, error) {
@@ -257,7 +314,9 @@ func (s *Store) SearchCount(ctx context.Context, filter MessageFilter) (int, err
 		return 0, err
 	}
 	if !hasQuery {
-		query := "select count(*) from messages m where 1=1"
+		// Counted in refs, for the same reason the page is: one ref is one
+		// record, however many rows the mirror holds for it.
+		query := "select count(distinct m.msg_id) from messages m where 1=1"
 		var args []any
 		query += " and not (" + providerNativeSystemMetadataMessageSQLPredicate + ")"
 		query, args = applyMessageFilters(query, args, filter, true)
@@ -271,7 +330,7 @@ func (s *Store) SearchCount(ctx context.Context, filter MessageFilter) (int, err
 	if err != nil {
 		return 0, err
 	}
-	query := `select count(*) from messages_fts f join messages m on m.rowid=f.rowid where messages_fts match ?`
+	query := `select count(distinct m.msg_id) from messages_fts f join messages m on m.rowid=f.rowid where messages_fts match ?`
 	args := []any{ftsQuery}
 	query += " and not (" + providerNativeSystemMetadataMessageSQLPredicate + ")"
 	query, args = applyMessageFilters(query, args, filter, true)
