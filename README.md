@@ -90,6 +90,23 @@ All commands except `update` use the existing local archives. `update` gets new
 items from the selected apps. Normal text is the interface for people and agents.
 The Mac app uses the same typed protobuf contract.
 
+## Keep a copy on a machine you control
+
+`replicate` copies archives to another machine over SSH, so an agent running
+somewhere else can read them:
+
+```sh
+"$TRAWL" replicate --to you@your-host:/srv/opentrawl
+"$TRAWL" replicate --to you@your-host:/srv/opentrawl whatsapp imessage
+```
+
+It needs `ssh` and `sqlite3_rsync` on this Mac, and `sqlite3` plus
+`sqlite3_rsync` on the replica host. The copy only goes one way and never
+deletes anything on the replica. Every archive is validated on the replica host
+before the run reports success, and the replica keeps the same private file
+permissions as the original — treat that host as holding the same personal data
+as your Mac.
+
 Root commands use stable exit statuses: `0` means complete, `1` means failed,
 `2` means the command was used incorrectly, and `3` means the result is partial
 but stdout is still usable. On a partial result, stderr names the trawlers that
