@@ -75,7 +75,7 @@ func (s *Store) PeopleMatchingQuery(ctx context.Context, query string) ([]model.
 
 func (s *Store) personIdentifiersMatchingResolverQuery(ctx context.Context, query string) ([]string, error) {
 	rows, err := s.database().QueryContext(ctx, `
-select id, name, sort_name, aka_json, tags_json, accounts_json, sources_json, apple_json, google_json
+select id, name, sort_name, card_json, aka_json, tags_json, accounts_json, sources_json, apple_json, google_json
 from people
 order by lower(name), id`)
 	if err != nil {
@@ -84,11 +84,12 @@ order by lower(name), id`)
 	var matchingPersonIdentifiers []string
 	for rows.Next() {
 		var person model.Person
-		var akaJSON, tagsJSON, accountsJSON, sourcesJSON, appleJSON, googleJSON string
+		var cardJSON, akaJSON, tagsJSON, accountsJSON, sourcesJSON, appleJSON, googleJSON string
 		if err := rows.Scan(
 			&person.ID,
 			&person.Name,
 			&person.SortName,
+			&cardJSON,
 			&akaJSON,
 			&tagsJSON,
 			&accountsJSON,
@@ -96,6 +97,10 @@ order by lower(name), id`)
 			&appleJSON,
 			&googleJSON,
 		); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if err := decodeJSON(cardJSON, &person.Card); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -209,6 +214,10 @@ func personNameOrHumanReadableContactValueThatMatchedQuery(
 ) string {
 	humanReadableNamesAndContactValues := []string{person.Name, person.SortName}
 	humanReadableNamesAndContactValues = append(humanReadableNamesAndContactValues, person.AKA...)
+	humanReadableNamesAndContactValues = append(
+		humanReadableNamesAndContactValues,
+		person.Card.SearchNames()...,
+	)
 	for _, source := range person.Sources {
 		humanReadableNamesAndContactValues = append(
 			humanReadableNamesAndContactValues,
@@ -312,6 +321,11 @@ func resolverMatchCandidate(person model.Person) whomatch.Candidate {
 	aliases := []string{person.ID, person.SortName, slug, strings.ReplaceAll(slug, "-", " ")}
 	aliases = append(aliases, person.AKA...)
 	aliases = append(aliases, person.Tags...)
+	// A contact can be filed under a circumstance rather than a name — where
+	// and when someone was met. Their card still names them, so finding a
+	// person by nickname, maiden name or phonetic spelling works the same way
+	// finding them by search does.
+	aliases = append(aliases, person.Card.SearchNames()...)
 	for _, source := range person.Sources {
 		aliases = append(aliases, source.Names...)
 		aliases = appendPersonAccountIdentifierTexts(aliases, source.Accounts)

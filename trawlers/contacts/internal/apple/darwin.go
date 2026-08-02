@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	sqlite3 "github.com/mattn/go-sqlite3"
+	"github.com/opentrawl/opentrawl/trawlers/contacts/internal/model"
 	"github.com/opentrawl/opentrawl/trawlkit/cache"
 	ckstore "github.com/opentrawl/opentrawl/trawlkit/store"
 )
@@ -388,11 +389,30 @@ func readAddressBookRecords(ctx context.Context, db *sql.DB, schema addressBookS
 	if schema.recordColumns["ZTHUMBNAILIMAGEDATA"] {
 		avatarExpr = "ZTHUMBNAILIMAGEDATA"
 	}
+	// Every card column is optional. Address book layouts differ across macOS
+	// versions and across accounts on one Mac, so a database that lacks one
+	// contributes an empty value rather than failing the whole read.
+	cardColumns := []string{
+		"ZMAIDENNAME",
+		"ZTITLE",
+		"ZSUFFIX",
+		"ZNICKNAME",
+		"ZPHONETICFIRSTNAME",
+		"ZPHONETICMIDDLENAME",
+		"ZPHONETICLASTNAME",
+		"ZPHONETICORGANIZATION",
+		"ZDEPARTMENT",
+		"ZJOBTITLE",
+	}
+	cardExprs := make([]string, 0, len(cardColumns))
+	for _, column := range cardColumns {
+		cardExprs = append(cardExprs, optionalTextExpression(schema.recordColumns, column))
+	}
 	query := fmt.Sprintf(`
-select Z_PK, %s, coalesce(ZFIRSTNAME, ''), %s, coalesce(ZLASTNAME, ''), coalesce(ZORGANIZATION, ''), %s
+select Z_PK, %s, coalesce(ZFIRSTNAME, ''), %s, coalesce(ZLASTNAME, ''), coalesce(ZORGANIZATION, ''), %s, %s
 from ZABCDRECORD
 where Z_ENT = ?
-order by Z_PK`, idExpr, middleExpr, avatarExpr)
+order by Z_PK`, idExpr, middleExpr, avatarExpr, strings.Join(cardExprs, ", "))
 	rows, err := db.QueryContext(ctx, query, schema.contactEntity)
 	if err != nil {
 		return nil, nil, err
@@ -404,18 +424,36 @@ order by Z_PK`, idExpr, middleExpr, avatarExpr)
 		var pk int64
 		var identifier, firstName, middleName, lastName, organisation string
 		var avatar []byte
-		if err := rows.Scan(&pk, &identifier, &firstName, &middleName, &lastName, &organisation, &avatar); err != nil {
+		var card model.Card
+		if err := rows.Scan(
+			&pk, &identifier, &firstName, &middleName, &lastName, &organisation, &avatar,
+			&card.PreviousFamilyName,
+			&card.NamePrefix,
+			&card.NameSuffix,
+			&card.Nickname,
+			&card.PhoneticGivenName,
+			&card.PhoneticMiddleName,
+			&card.PhoneticFamilyName,
+			&card.PhoneticOrganizationName,
+			&card.DepartmentName,
+			&card.JobTitle,
+		); err != nil {
 			return nil, nil, err
 		}
 		identifier = strings.TrimSpace(identifier)
 		if identifier == "" {
 			continue
 		}
+		card.GivenName = firstName
+		card.MiddleName = middleName
+		card.FamilyName = lastName
+		card.OrganizationName = organisation
 		contact := Contact{
 			Identifier: identifier,
 			FirstName:  strings.TrimSpace(firstName),
 			LastName:   strings.TrimSpace(lastName),
 			FullName:   fullName(firstName, middleName, lastName, organisation),
+			Card:       card.Clean(),
 			AvatarData: append([]byte(nil), avatar...),
 		}
 		records[pk] = &addressBookRecord{contact: contact}
