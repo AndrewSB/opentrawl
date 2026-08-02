@@ -54,6 +54,7 @@ type Person struct {
 	ID                                               string                                           `json:"id" yaml:"id"`
 	Name                                             string                                           `json:"name" yaml:"name"`
 	SortName                                         string                                           `json:"sort_name,omitempty" yaml:"sort_name,omitempty"`
+	Card                                             Card                                             `json:"card,omitzero" yaml:"card,omitempty"`
 	AKA                                              []string                                         `json:"aka,omitempty" yaml:"aka,omitempty"`
 	Tags                                             []string                                         `json:"tags,omitempty" yaml:"tags,omitempty"`
 	Emails                                           []ContactValue                                   `json:"emails,omitempty" yaml:"emails,omitempty"`
