@@ -35,7 +35,11 @@ func TestImportDesktopCoreDataShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Messages != 4 || status.MediaMessages != 1 || status.UnreadChats != 1 || status.UnreadMessages != 2 {
+	// The fixture stores one message twice under the stanza id 'dm-in', so the
+	// import writes four rows and a reader can reach three messages. Import
+	// counts rows, because that is what it wrote; status counts what a reader
+	// can reach, and reports the row beyond them separately.
+	if status.Messages != 3 || status.DuplicateMessageRows != 1 || status.MediaMessages != 1 || status.UnreadChats != 1 || status.UnreadMessages != 2 {
 		t.Fatalf("unexpected status: %+v", status)
 	}
 
