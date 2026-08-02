@@ -116,6 +116,22 @@ Search and list results show a stable link. Use that link directly with
 `"$TRAWL" open LINK`; you do not need to add a trawler name. Internal record
 identities stay inside the typed and storage contracts.
 
+## Read an archive on Linux
+
+Archives are ordinary SQLite files and the read path is platform-neutral, so a
+Linux machine holding a copy of an archive can answer `status`, `search`,
+`who`, `conversations`, `messages` and `open` against it.
+
+`update` is macOS-only, because sourcing data means reading Apple apps on the
+Mac they run on. A Linux machine is a place to read an archive, not a place to
+build one, and the trawlers that need macOS APIs say so rather than producing
+an empty result.
+
+`scripts/check-linux` builds and vets every Go module for Linux, and the
+pre-push hook runs it with the other checks. It does not run the test suites:
+several need macOS fixtures, so a green Linux gate means the tree still
+compiles for Linux, which is the part that regresses silently.
+
 ## Available trawlers
 
 One Go registry decides which trawlers every CLI and Mac app operation can use:
