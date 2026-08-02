@@ -38,4 +38,5 @@ done
 if [[ "$pushing" -eq 1 ]]; then
   "$root/scripts/check-lint"
   "$root/scripts/check-test"
+  "$root/scripts/check-linux"
 fi
