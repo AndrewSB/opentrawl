@@ -6,6 +6,7 @@ type SourceContact struct {
 	Source                                                string              `json:"source"`
 	ExternalID                                            string              `json:"external_id,omitempty"`
 	Name                                                  string              `json:"name"`
+	Card                                                  Card                `json:"card,omitzero"`
 	Tags                                                  []string            `json:"tags,omitempty"`
 	Emails                                                []ContactValue      `json:"emails,omitempty"`
 	Phones                                                []ContactValue      `json:"phones,omitempty"`

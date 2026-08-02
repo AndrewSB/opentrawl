@@ -78,6 +78,7 @@ type Contact struct {
 	FirstName  string          `json:"first_name"`
 	LastName   string          `json:"last_name"`
 	FullName   string          `json:"full_name"`
+	Card       model.Card      `json:"card,omitzero"`
 	Emails     []string        `json:"emails"`
 	Phones     []string        `json:"phones"`
 	Addresses  []PostalAddress `json:"addresses,omitempty"`
@@ -112,7 +113,7 @@ func (c Contact) Name() string {
 }
 
 func (c Contact) SourceContact(includeAvatar bool) model.SourceContact {
-	out := model.SourceContact{Source: "apple", ExternalID: c.Identifier, Name: c.Name()}
+	out := model.SourceContact{Source: "apple", ExternalID: c.Identifier, Name: c.Name(), Card: c.Card.Clean()}
 	for i, email := range c.Emails {
 		if strings.TrimSpace(email) != "" {
 			out.Emails = append(out.Emails, model.ContactValue{Value: email, Label: "other", Source: "apple", Primary: i == 0})

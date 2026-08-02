@@ -53,8 +53,10 @@ func UseExisting(ctx context.Context, st *ckstore.Store, path string) (*Store, e
 }
 
 func ensureCurrentSchema(ctx context.Context, st *ckstore.Store) error {
-	_, err := st.DB().ExecContext(ctx, schema+state.Schema+shortref.Schema)
-	return err
+	if _, err := st.DB().ExecContext(ctx, schema+state.Schema+shortref.Schema); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Store) Close() error {
