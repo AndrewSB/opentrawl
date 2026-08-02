@@ -23,6 +23,7 @@ type CLI struct {
 
 	Status        StatusCmd        `cmd:"" help:"${status_help}"`
 	Update        UpdateCmd        `cmd:"" help:"Get new items from apps"`
+	Replicate     ReplicateCmd     `cmd:"" help:"Copy archives to a machine you control"`
 	Search        SearchCmd        `cmd:"" help:"Find anything in your archive"`
 	Who           WhoCmd           `cmd:"" help:"Find a person"`
 	Conversations ConversationsCmd `cmd:"" help:"List conversations"`
@@ -41,6 +42,9 @@ type Runtime struct {
 	log               *logRun
 	canonicalObserver canonicalConsumerObserver
 	stateRoot         string
+	// replicationRunner is the same kind of seam as now: production leaves it
+	// nil and gets the real ssh/sqlite3_rsync runner.
+	replicationRunner replicationCommandRunner
 }
 
 type StatusCmd struct {
