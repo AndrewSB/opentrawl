@@ -5,6 +5,7 @@ create table if not exists people (
   id text primary key,
   name text not null,
   sort_name text not null default '',
+  card_json text not null default '{}',
   aka_json text not null default '[]',
   tags_json text not null default '[]',
   avatar_json text not null default '{}',
