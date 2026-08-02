@@ -43,7 +43,7 @@ func (e personSearchMatchedMoreThanOnePersonError) Unwrap() error {
 
 func (s *Store) People(ctx context.Context) ([]model.Person, error) {
 	rows, err := s.database().QueryContext(ctx, `
-select id, name, sort_name, aka_json, tags_json, avatar_json, accounts_json,
+select id, name, sort_name, card_json, aka_json, tags_json, avatar_json, accounts_json,
        sources_json, apple_json, google_json, body, person_relationship_or_context_description,
        person_relationship_or_context_description_stated_date, created_at, updated_at
 from people
@@ -79,7 +79,7 @@ order by lower(name), id`)
 
 func (s *Store) Person(ctx context.Context, id string) (model.Person, error) {
 	row := s.database().QueryRowContext(ctx, `
-select id, name, sort_name, aka_json, tags_json, avatar_json, accounts_json,
+select id, name, sort_name, card_json, aka_json, tags_json, avatar_json, accounts_json,
        sources_json, apple_json, google_json, body, person_relationship_or_context_description,
        person_relationship_or_context_description_stated_date, created_at, updated_at
 from people
@@ -170,10 +170,10 @@ func (s *Store) savePerson(ctx context.Context, person model.Person) error {
 
 func scanPerson(row interface{ Scan(dest ...any) error }) (model.Person, error) {
 	var person model.Person
-	var akaJSON, tagsJSON, avatarJSON, accountsJSON, sourcesJSON, appleJSON, googleJSON string
+	var cardJSON, akaJSON, tagsJSON, avatarJSON, accountsJSON, sourcesJSON, appleJSON, googleJSON string
 	var storedPersonRelationshipOrContextDescriptionStatedDate string
 	var createdAt, updatedAt string
-	if err := row.Scan(&person.ID, &person.Name, &person.SortName, &akaJSON, &tagsJSON, &avatarJSON,
+	if err := row.Scan(&person.ID, &person.Name, &person.SortName, &cardJSON, &akaJSON, &tagsJSON, &avatarJSON,
 		&accountsJSON, &sourcesJSON, &appleJSON, &googleJSON, &person.Body,
 		&person.PersonRelationshipOrContextDescription,
 		&storedPersonRelationshipOrContextDescriptionStatedDate, &createdAt, &updatedAt); err != nil {
@@ -188,6 +188,9 @@ func scanPerson(row interface{ Scan(dest ...any) error }) (model.Person, error) 
 	}
 	person.PersonRelationshipOrContextDescriptionStatedDate =
 		personRelationshipOrContextDescriptionStatedDate
+	if err := decodeJSON(cardJSON, &person.Card); err != nil {
+		return model.Person{}, err
+	}
 	if err := decodeJSONList(akaJSON, &person.AKA); err != nil {
 		return model.Person{}, err
 	}
@@ -271,14 +274,15 @@ func upsertPersonRow(ctx context.Context, tx *sql.Tx, person model.Person) error
 	}
 	_, err = tx.ExecContext(ctx, `
 insert into people(
-  id, name, sort_name, aka_json, tags_json, avatar_json, accounts_json,
+  id, name, sort_name, card_json, aka_json, tags_json, avatar_json, accounts_json,
   sources_json, apple_json, google_json, body, person_relationship_or_context_description,
   person_relationship_or_context_description_stated_date,
   created_at, updated_at
-) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 on conflict(id) do update set
   name = excluded.name,
   sort_name = excluded.sort_name,
+  card_json = excluded.card_json,
   aka_json = excluded.aka_json,
   tags_json = excluded.tags_json,
   avatar_json = excluded.avatar_json,
@@ -291,7 +295,7 @@ on conflict(id) do update set
   person_relationship_or_context_description_stated_date = excluded.person_relationship_or_context_description_stated_date,
   created_at = excluded.created_at,
   updated_at = excluded.updated_at`,
-		person.ID, person.Name, person.SortName, mustJSONList(person.AKA), mustJSONList(person.Tags),
+		person.ID, person.Name, person.SortName, mustJSON(person.Card), mustJSONList(person.AKA), mustJSONList(person.Tags),
 		mustJSON(avatarMetadata(person.Avatar)), mustJSON(person.Accounts), mustJSON(person.Sources),
 		mustJSON(person.Apple), mustJSON(person.Google), person.Body,
 		person.PersonRelationshipOrContextDescription,
@@ -360,6 +364,7 @@ func canonicalPerson(person model.Person) model.Person {
 	person.ID = strings.TrimSpace(person.ID)
 	person.Name = strings.Join(strings.Fields(person.Name), " ")
 	person.SortName = strings.TrimSpace(person.SortName)
+	person.Card = person.Card.Clean()
 	person.Path = ""
 	person.Extra = nil
 	if person.CreatedAt.IsZero() {
