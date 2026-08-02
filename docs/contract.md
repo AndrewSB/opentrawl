@@ -199,6 +199,20 @@ not Calendar source data. Its typed provenance includes the
 `YYYY-MM-DD` value. When present, the annotation also accompanies the
 calendar's events in event lists and opened event details, so similarly named
 calendars retain their intended context.
+A ref names one record even when the archive holds several rows for it. A
+trawler mirrors a source that assigns its own row keys, and a source can store
+one record under two of them; the mirror keeps every row, because deciding which
+of the source's rows are real is not the mirror's decision to make. Resolution
+is:
+
+- `open` resolves a ref to a single row, the newest by the record's own time and
+  then by source row key;
+- `search` returns one hit per ref, and it is the same row `open` returns, so a
+  hit and the record it opens are never different copies;
+- totals count refs rather than rows, for the same reason.
+
+A source that can match one record in more than one place distinguishes those
+matches by anchor, not by returning the ref twice.
 
 ## Output and failure rules
 
