@@ -140,6 +140,16 @@ select '` + ownerWhoKey + `'
 where ` + prefix + `from_me = 1`
 }
 
+// contactJIDPredicate matches a contact by any of the identifiers a JID can
+// take. Every disjunct compares an indexed contact column against a value
+// derived from the outer row, so SQLite can satisfy each one with an index
+// lookup. Writing the third as `c.lid || '@lid' = <expr>` instead computes a
+// value from the contact on every candidate row, which no index can serve: the
+// join degrades to a full scan of contacts for each row on the other side, and
+// on a real archive that is minutes of CPU per read.
 func contactJIDPredicate(contactAlias, jidExpr string) string {
-	return contactAlias + ".jid = " + jidExpr + " or " + contactAlias + ".lid = " + jidExpr + " or " + contactAlias + ".lid || '@lid' = " + jidExpr
+	lidSuffix := "(case when " + jidExpr + " like '%@lid' then substr(" + jidExpr + ", 1, length(" + jidExpr + ") - 4) end)"
+	return contactAlias + ".jid = " + jidExpr +
+		" or " + contactAlias + ".lid = " + jidExpr +
+		" or " + contactAlias + ".lid = " + lidSuffix
 }
