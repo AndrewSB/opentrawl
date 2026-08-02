@@ -57,7 +57,7 @@ type canonicalWhatsAppMessageDisplayNames struct {
 type canonicalSenderNames map[string]string
 
 func (s *Store) canonicalWhatsAppMessageDisplayNames(ctx context.Context) (canonicalWhatsAppMessageDisplayNames, error) {
-	records, err := s.whoCandidateRecords(ctx)
+	records, err := s.whoCandidateNameRecords(ctx)
 	if err != nil {
 		return canonicalWhatsAppMessageDisplayNames{}, err
 	}
