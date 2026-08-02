@@ -23,6 +23,7 @@ as `./trawl`:
 ./trawl --help
 ./trawl status [TRAWLER] [FLAGS]
 ./trawl update [TRAWLER ...] [FLAGS]
+./trawl replicate --to USER@HOST:/PATH [TRAWLER ...] [FLAGS]
 ./trawl search [WORDS ...] [FLAGS]
 ./trawl who NAME [FLAGS]
 ./trawl conversations [FLAGS]
@@ -211,6 +212,23 @@ that are not built. Updating Photos refreshes Apple's facts and reports those
 unbuilt steps without treating the successful refresh as a failure. Running
 an unbuilt step directly exits non-zero and explains that it is not built.
 Failures are separate typed operation failures, not extra status text.
+
+## Replication
+
+`replicate` copies trawler archives to another machine the person controls. It
+is a copy, never a sync: the replica is written, the Mac is not read back into,
+and nothing on the replica host is ever deleted.
+
+The replica is a state root, so every archive keeps its path relative to the
+local state root. An archive stored outside that root has nowhere to go and
+fails the whole run rather than landing somewhere arbitrary.
+
+Replication holds the same kind of exclusive state-root lock as `update`, so a
+copy never reads an archive mid-rewrite. Every dependency is checked before the
+first byte moves, because a run that fails halfway leaves the replica holding
+a mix of two archives. Each replicated archive is validated on the replica host
+before the run is called successful, and the replica keeps the same private
+file permissions as the original.
 
 ## Search and people
 
