@@ -96,7 +96,7 @@ func commandName(args []string) string {
 			continue
 		}
 		switch arg {
-		case "status", "update", "search", "who", "conversations", "messages", "open":
+		case "status", "update", "replicate", "search", "who", "conversations", "messages", "open":
 			return arg
 		}
 	}
