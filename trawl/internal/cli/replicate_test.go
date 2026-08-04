@@ -112,7 +112,10 @@ func (f *fakeReplicationRunner) Run(_ context.Context, name string, args ...stri
 	if response, known := f.responses[key]; known {
 		return response, nil
 	}
-	if name == "ssh" && len(args) > 2 && args[2] == "sqlite3" {
+	// The validation command is one argument, because ssh does not preserve
+	// argument boundaries; match it by prefix rather than by an argv shape the
+	// remote shell would never see.
+	if name == "ssh" && len(args) > 2 && strings.HasPrefix(args[2], "sqlite3 ") {
 		return "ok\n", nil
 	}
 	return "", nil
@@ -260,6 +263,33 @@ func TestReplicateCopiesValidatesAndProtectsEachArchive(t *testing.T) {
 	if !runner.ran("ssh", "PRAGMA quick_check;") {
 		t.Fatal("the replica was not validated")
 	}
+	assertValidationIsOneRemoteArgument(t, runner)
+}
+
+// assertValidationIsOneRemoteArgument pins the boundary ssh does not keep. ssh
+// joins its arguments with spaces and the remote shell re-splits them, so a
+// statement passed as its own argument arrives at sqlite3 as two words:
+// "PRAGMA" runs alone, which is incomplete SQL, and the replica reports a
+// connection failure for an archive that is intact. Checking the joined
+// command is not enough — it looks identical either way, which is why this
+// went unnoticed. The statement has to survive as a single argument.
+func assertValidationIsOneRemoteArgument(t *testing.T, runner *fakeReplicationRunner) {
+	t.Helper()
+	for _, command := range runner.commands {
+		if command.name != "ssh" {
+			continue
+		}
+		for _, arg := range command.args {
+			if !strings.Contains(arg, "quick_check") {
+				continue
+			}
+			if !strings.Contains(arg, "'PRAGMA quick_check;'") {
+				t.Fatalf("the validation statement reaches the replica shell split apart: %q", arg)
+			}
+			return
+		}
+	}
+	t.Fatal("no validation command was run")
 }
 
 // A replica that arrived corrupt reads as a successful copy, which is worse
@@ -267,7 +297,7 @@ func TestReplicateCopiesValidatesAndProtectsEachArchive(t *testing.T) {
 func TestReplicateFailsWhenTheReplicaDoesNotPassIntegrityValidation(t *testing.T) {
 	runner := &fakeReplicationRunner{
 		responses: map[string]string{
-			"ssh -- host sqlite3 -readonly /srv/replica/whatsapp/whatsapp.db PRAGMA quick_check;": "database disk image is malformed",
+			"ssh -- host sqlite3 -readonly /srv/replica/whatsapp/whatsapp.db 'PRAGMA quick_check;'": "database disk image is malformed",
 		},
 	}
 	replicator, trawlers := replicatorOverStateRoot(t, runner, "whatsapp")
