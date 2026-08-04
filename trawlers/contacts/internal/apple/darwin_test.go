@@ -156,11 +156,27 @@ func TestReadAddressBookDirReadsRootAndSourceDatabases(t *testing.T) {
 	if source.Name() != "Ada Augusta Lovelace" {
 		t.Fatalf("name = %q", source.Name())
 	}
-	if len(source.Phones) != 1 || source.Phones[0] != "+1 555 0100" {
+	// The label the card gave a value is carried, not flattened: the reader
+	// already selects ZLABEL, and "mobile" is the difference between a number
+	// you can text and a desk phone nobody answers.
+	if len(source.Phones) != 1 || source.Phones[0].Value != "+1 555 0100" {
 		t.Fatalf("phones = %#v", source.Phones)
 	}
-	if len(source.Emails) != 1 || source.Emails[0] != "ada@example.com" {
+	if source.Phones[0].Label != "_$!<Mobile>!$_" {
+		t.Fatalf("phone label was discarded: %#v", source.Phones[0])
+	}
+	if len(source.Emails) != 1 || source.Emails[0].Value != "ada@example.com" {
 		t.Fatalf("emails = %#v", source.Emails)
+	}
+	if source.Emails[0].Label != "_$!<Home>!$_" {
+		t.Fatalf("email label was discarded: %#v", source.Emails[0])
+	}
+	sourceContact := source.SourceContact(false)
+	if len(sourceContact.Phones) != 1 || sourceContact.Phones[0].Label != "mobile" {
+		t.Fatalf("phone label did not reach the source contact: %#v", sourceContact.Phones)
+	}
+	if len(sourceContact.Emails) != 1 || sourceContact.Emails[0].Label != "home" {
+		t.Fatalf("email label did not reach the source contact: %#v", sourceContact.Emails)
 	}
 	if len(source.Addresses) != 1 {
 		t.Fatalf("addresses = %#v", source.Addresses)
