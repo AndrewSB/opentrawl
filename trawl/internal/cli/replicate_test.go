@@ -191,7 +191,11 @@ func TestPreflightRefusesBeforeCopyingWhenADependencyIsMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := replicator.preflight(context.Background(), destination, trawlers); err == nil {
+	archives, _, err := replicator.plan(destination, trawlers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := replicator.preflight(context.Background(), destination, archives); err == nil {
 		t.Fatal("preflight accepted a missing local sqlite3_rsync")
 	}
 	if runner.ran("sqlite3_rsync", "") {
@@ -210,7 +214,11 @@ func TestPreflightRefusesWhenTheReplicaHostLacksSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = replicator.preflight(context.Background(), destination, trawlers)
+	archives, _, err := replicator.plan(destination, trawlers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = replicator.preflight(context.Background(), destination, archives)
 	if err == nil {
 		t.Fatal("preflight accepted a replica host without sqlite3")
 	}
@@ -227,7 +235,11 @@ func TestReplicateCopiesValidatesAndProtectsEachArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	replicated, err := replicator.replicate(context.Background(), destination, trawlers)
+	archives, remoteDirs, err := replicator.plan(destination, trawlers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replicated, err := replicator.replicate(context.Background(), destination, archives, remoteDirs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +275,11 @@ func TestReplicateFailsWhenTheReplicaDoesNotPassIntegrityValidation(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = replicator.replicate(context.Background(), destination, trawlers)
+	archives, remoteDirs, err := replicator.plan(destination, trawlers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = replicator.replicate(context.Background(), destination, archives, remoteDirs)
 	if err == nil {
 		t.Fatal("replicate reported success for a corrupt replica")
 	}
@@ -282,7 +298,11 @@ func TestReplicateSkipsTrawlersWithNoArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	replicated, err := replicator.replicate(context.Background(), destination, trawlers)
+	archives, remoteDirs, err := replicator.plan(destination, trawlers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replicated, err := replicator.replicate(context.Background(), destination, archives, remoteDirs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,4 +353,78 @@ func TestBoundedBufferStopsAtItsLimit(t *testing.T) {
 	if buffer.Len() != maxReplicationCommandOutputBytes {
 		t.Fatalf("buffer kept %d bytes, want %d", buffer.Len(), maxReplicationCommandOutputBytes)
 	}
+}
+
+// An archive records attachment paths relative to its own directory, so a
+// database that arrived before its files would point at names that are not
+// there yet. Notes keeps every image and document in a note this way.
+func TestAttachmentsAreReplicatedBeforeTheDatabaseThatNamesThem(t *testing.T) {
+	runner := &fakeReplicationRunner{}
+	replicator, trawlers := replicatorOverStateRoot(t, runner, "notes")
+	attachments := filepath.Join(filepath.Dir(trawlerArchivePathForTest(t, replicator, trawlers[0])), "attachments")
+	if err := os.MkdirAll(filepath.Join(attachments, "abc"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(attachments, "abc", "scan.pdf"), []byte("pdf"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	destination, err := parseReplicationDestination("host:/srv/replica")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archives, remoteDirs, err := replicator.plan(destination, trawlers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := replicator.replicate(context.Background(), destination, archives, remoteDirs); err != nil {
+		t.Fatal(err)
+	}
+
+	rsyncAt, databaseAt := -1, -1
+	for index, command := range runner.commands {
+		if command.name == "rsync" && rsyncAt < 0 {
+			rsyncAt = index
+		}
+		if command.name == "sqlite3_rsync" && databaseAt < 0 {
+			databaseAt = index
+		}
+	}
+	if rsyncAt < 0 {
+		t.Fatal("the attachments directory was never replicated")
+	}
+	if databaseAt < 0 {
+		t.Fatal("the archive was never replicated")
+	}
+	if rsyncAt > databaseAt {
+		t.Fatal("the database was replicated before the attachments it names")
+	}
+	if !runner.ran("rsync", "host:/srv/replica/notes/attachments/") {
+		t.Fatalf("attachments went to the wrong place: %+v", runner.commands)
+	}
+}
+
+// An archive with no attachments directory must not require rsync at all.
+func TestReplicationDoesNotRequireRsyncWithoutAttachments(t *testing.T) {
+	runner := &fakeReplicationRunner{missingLocal: map[string]bool{"rsync": true}}
+	replicator, trawlers := replicatorOverStateRoot(t, runner, "whatsapp")
+	destination, err := parseReplicationDestination("host:/srv/replica")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archives, _, err := replicator.plan(destination, trawlers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := replicator.preflight(context.Background(), destination, archives); err != nil {
+		t.Fatalf("rsync was required for an archive with no attachments: %v", err)
+	}
+}
+
+func trawlerArchivePathForTest(t *testing.T, replicator archiveReplicator, trawler InstalledTrawler) string {
+	t.Helper()
+	located, err := replicator.locate(trawler.Trawler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return located.TrawlerArchivePath
 }

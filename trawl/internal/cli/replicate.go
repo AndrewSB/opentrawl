@@ -67,10 +67,20 @@ func (c *ReplicateCmd) Run(r *Runtime) error {
 		locate:   r.trawlerExecutor().ResolveTrawlerArchiveLocation,
 		stderr:   r.lockedStderr(),
 	}
-	if err := replicator.preflight(ctx, destination, trawlers); err != nil {
+	archives, remoteDirs, err := replicator.plan(destination, trawlers)
+	if err != nil {
 		return err
 	}
-	replicated, err := replicator.replicate(ctx, destination, trawlers)
+	if len(archives) == 0 {
+		return replicationError{
+			code:    "no_archives",
+			message: "None of the selected trawlers has an archive to replicate. Run update first.",
+		}
+	}
+	if err := replicator.preflight(ctx, destination, archives); err != nil {
+		return err
+	}
+	replicated, err := replicator.replicate(ctx, destination, archives, remoteDirs)
 	if err != nil {
 		return err
 	}
@@ -140,8 +150,12 @@ type archiveReplicator struct {
 // preflight fails before anything is copied. A replication that dies halfway
 // leaves the replica holding a mix of two archives, so a missing dependency has
 // to be found while the replica is still untouched.
-func (a archiveReplicator) preflight(ctx context.Context, destination replicationDestination, trawlers []InstalledTrawler) error {
-	for _, executable := range []string{"ssh", "sqlite3_rsync"} {
+func (a archiveReplicator) preflight(ctx context.Context, destination replicationDestination, archives []replicationArchive) error {
+	required := []string{"ssh", "sqlite3_rsync"}
+	if anyArchiveCarriesAttachments(archives) {
+		required = append(required, "rsync")
+	}
+	for _, executable := range required {
 		if _, err := a.commands.LookPath(executable); err != nil {
 			return replicationError{
 				code:    "dependency_missing",
@@ -149,7 +163,8 @@ func (a archiveReplicator) preflight(ctx context.Context, destination replicatio
 			}
 		}
 	}
-	for _, executable := range []string{"sqlite3_rsync", "sqlite3"} {
+	remoteRequired := []string{"sqlite3_rsync", "sqlite3"}
+	for _, executable := range remoteRequired {
 		if _, err := a.commands.Run(ctx, "ssh", "--", destination.host, "command", "-v", executable); err != nil {
 			return replicationError{
 				code:    "remote_dependency_missing",
@@ -163,18 +178,9 @@ func (a archiveReplicator) preflight(ctx context.Context, destination replicatio
 func (a archiveReplicator) replicate(
 	ctx context.Context,
 	destination replicationDestination,
-	trawlers []InstalledTrawler,
+	archives []replicationArchive,
+	remoteDirs []string,
 ) ([]string, error) {
-	archives, remoteDirs, err := a.plan(destination, trawlers)
-	if err != nil {
-		return nil, err
-	}
-	if len(archives) == 0 {
-		return nil, replicationError{
-			code:    "no_archives",
-			message: "None of the selected trawlers has an archive to replicate. Run update first.",
-		}
-	}
 	if _, err := a.commands.Run(ctx, "ssh", append([]string{"--", destination.host, "mkdir", "-p", "--"}, remoteDirs...)...); err != nil {
 		return nil, replicationCommandError("prepare remote state root", err)
 	}
@@ -184,6 +190,21 @@ func (a archiveReplicator) replicate(
 	replicated := make([]string, 0, len(archives))
 	for _, archive := range archives {
 		_, _ = fmt.Fprintf(a.stderr, "%s replicating…\n", archive.name)
+		// Attachments first. An archive records attachment paths relative to
+		// its own directory, so a database that arrived before its files would
+		// point at names that are not there yet. Stale remote attachments are
+		// harmless and are kept: replication never deletes on the replica.
+		if archive.localAttachments != "" {
+			if _, err := a.commands.Run(ctx, "ssh", "--", destination.host, "mkdir", "-p", "--", archive.remoteAttachments); err != nil {
+				return nil, replicationCommandError("prepare the "+archive.name+" attachments", err)
+			}
+			if _, err := a.commands.Run(ctx, "rsync", "-a", "--",
+				archive.localAttachments+string(filepath.Separator),
+				destination.host+":"+archive.remoteAttachments+"/",
+			); err != nil {
+				return nil, replicationCommandError("replicate the "+archive.name+" attachments", err)
+			}
+		}
 		if _, err := a.commands.Run(ctx, "sqlite3_rsync", archive.local, destination.host+":"+archive.remote); err != nil {
 			return nil, replicationCommandError("replicate "+archive.name, err)
 		}
@@ -244,6 +265,11 @@ func (a archiveReplicator) plan(
 			local:  located.TrawlerArchivePath,
 			remote: path.Join(destination.root, remoteRelative),
 		}
+		localAttachments := filepath.Join(filepath.Dir(archive.local), attachmentsDirName)
+		if info, err := os.Stat(localAttachments); err == nil && info.IsDir() {
+			archive.localAttachments = localAttachments
+			archive.remoteAttachments = path.Join(path.Dir(archive.remote), attachmentsDirName)
+		}
 		archives = append(archives, archive)
 		remoteDirs = append(remoteDirs, path.Dir(archive.remote))
 	}
@@ -267,9 +293,25 @@ func portableRemoteRelativePath(located trawlkit.ResolvedTrawlerArchiveLocation)
 }
 
 type replicationArchive struct {
-	name   string
-	local  string
-	remote string
+	name              string
+	local             string
+	remote            string
+	localAttachments  string
+	remoteAttachments string
+}
+
+// attachmentsDirName is the directory a trawler writes beside its archive for
+// files the database only references by path. Notes uses one for every image
+// and document in a note.
+const attachmentsDirName = "attachments"
+
+func anyArchiveCarriesAttachments(archives []replicationArchive) bool {
+	for _, archive := range archives {
+		if archive.localAttachments != "" {
+			return true
+		}
+	}
+	return false
 }
 
 type replicationCommandRunner interface {
