@@ -24,6 +24,10 @@ const (
 	// External tools can name private attachment files in their diagnostics.
 	// Keep those bytes bounded so a failure message stays a failure message.
 	maxReplicationCommandOutputBytes = 64 << 10
+	// A failure message is read in a terminal, so it carries only the first
+	// part of what the command said. The full output is bounded separately
+	// above.
+	maxReplicationCommandDetailRunes = 300
 )
 
 type ReplicateCmd struct {
@@ -181,11 +185,11 @@ func (a archiveReplicator) replicate(
 	archives []replicationArchive,
 	remoteDirs []string,
 ) ([]string, error) {
-	if _, err := a.commands.Run(ctx, "ssh", append([]string{"--", destination.host, "mkdir", "-p", "--"}, remoteDirs...)...); err != nil {
-		return nil, replicationCommandError("prepare remote state root", err)
+	if output, err := a.commands.Run(ctx, "ssh", append([]string{"--", destination.host, "mkdir", "-p", "--"}, remoteDirs...)...); err != nil {
+		return nil, replicationCommandError("prepare remote state root", output, err)
 	}
-	if _, err := a.commands.Run(ctx, "ssh", append([]string{"--", destination.host, "chmod", "700", "--"}, remoteDirs...)...); err != nil {
-		return nil, replicationCommandError("protect remote state root", err)
+	if output, err := a.commands.Run(ctx, "ssh", append([]string{"--", destination.host, "chmod", "700", "--"}, remoteDirs...)...); err != nil {
+		return nil, replicationCommandError("protect remote state root", output, err)
 	}
 	replicated := make([]string, 0, len(archives))
 	for _, archive := range archives {
@@ -195,21 +199,21 @@ func (a archiveReplicator) replicate(
 		// point at names that are not there yet. Stale remote attachments are
 		// harmless and are kept: replication never deletes on the replica.
 		if archive.localAttachments != "" {
-			if _, err := a.commands.Run(ctx, "ssh", "--", destination.host, "mkdir", "-p", "--", archive.remoteAttachments); err != nil {
-				return nil, replicationCommandError("prepare the "+archive.name+" attachments", err)
+			if output, err := a.commands.Run(ctx, "ssh", "--", destination.host, "mkdir", "-p", "--", archive.remoteAttachments); err != nil {
+				return nil, replicationCommandError("prepare the "+archive.name+" attachments", output, err)
 			}
-			if _, err := a.commands.Run(ctx, "rsync", "-a", "--",
+			if output, err := a.commands.Run(ctx, "rsync", "-a", "--",
 				archive.localAttachments+string(filepath.Separator),
 				destination.host+":"+archive.remoteAttachments+"/",
 			); err != nil {
-				return nil, replicationCommandError("replicate the "+archive.name+" attachments", err)
+				return nil, replicationCommandError("replicate the "+archive.name+" attachments", output, err)
 			}
 		}
-		if _, err := a.commands.Run(ctx, "sqlite3_rsync", archive.local, destination.host+":"+archive.remote); err != nil {
-			return nil, replicationCommandError("replicate "+archive.name, err)
+		if output, err := a.commands.Run(ctx, "sqlite3_rsync", archive.local, destination.host+":"+archive.remote); err != nil {
+			return nil, replicationCommandError("replicate "+archive.name, output, err)
 		}
-		if _, err := a.commands.Run(ctx, "ssh", "--", destination.host, "chmod", "600", "--", archive.remote); err != nil {
-			return nil, replicationCommandError("protect the "+archive.name+" replica", err)
+		if output, err := a.commands.Run(ctx, "ssh", "--", destination.host, "chmod", "600", "--", archive.remote); err != nil {
+			return nil, replicationCommandError("protect the "+archive.name+" replica", output, err)
 		}
 		// A replica that arrived corrupt is worse than no replica, because it
 		// reads as a successful copy. Validate before calling this one done.
@@ -225,7 +229,7 @@ func (a archiveReplicator) replicate(
 		remoteCommand := "sqlite3 -readonly " + archive.remote + " 'PRAGMA quick_check;'"
 		output, err := a.commands.Run(ctx, "ssh", "--", destination.host, remoteCommand)
 		if err != nil {
-			return nil, replicationCommandError("validate the "+archive.name+" replica", err)
+			return nil, replicationCommandError("validate the "+archive.name+" replica", output, err)
 		}
 		if strings.TrimSpace(output) != "ok" {
 			return nil, replicationError{
@@ -381,15 +385,39 @@ func (e replicationError) ErrorDescription() ckoutput.ErrorDescription {
 	return ckoutput.ErrorDescription{Code: e.code, Message: e.message}
 }
 
-func replicationCommandError(action string, err error) error {
+func replicationCommandError(action string, output string, err error) error {
 	var typed replicationError
 	if errors.As(err, &typed) {
 		return err
 	}
+	message := "Could not " + action + ". Check the SSH connection and the replica host, then retry: " + err.Error()
+	if detail := commandFailureDetail(output); detail != "" {
+		message += ": " + detail
+	}
 	return replicationError{
 		code:    "replication_failed",
-		message: "Could not " + action + ". Check the SSH connection and the replica host, then retry: " + err.Error(),
+		message: message,
 	}
+}
+
+// commandFailureDetail carries what the failed command actually said. ssh
+// reports only its own exit status, so without this a remote failure reads as
+// a connection problem whatever went wrong on the other side — a broken SQL
+// statement and an unreachable host produce the same "ssh: exit status 1".
+//
+// The runner already bounds what it collects, because external tools can name
+// private attachment files in their diagnostics. This bounds it further: a
+// failure message has to stay a message, so it is one line and short enough to
+// read.
+func commandFailureDetail(output string) string {
+	detail := strings.Join(strings.Fields(output), " ")
+	if detail == "" {
+		return ""
+	}
+	if runes := []rune(detail); len(runes) > maxReplicationCommandDetailRunes {
+		detail = string(runes[:maxReplicationCommandDetailRunes]) + "…"
+	}
+	return detail
 }
 
 type replicationLock struct {
