@@ -213,7 +213,17 @@ func (a archiveReplicator) replicate(
 		}
 		// A replica that arrived corrupt is worse than no replica, because it
 		// reads as a successful copy. Validate before calling this one done.
-		output, err := a.commands.Run(ctx, "ssh", "--", destination.host, "sqlite3", "-readonly", archive.remote, "PRAGMA quick_check;")
+		// ssh does not preserve argument boundaries: it joins its arguments with
+		// spaces and hands the remote shell one string to re-split. Passing the
+		// statement as its own argument therefore reaches sqlite3 as two — it
+		// runs "PRAGMA" on its own, which is incomplete SQL, and exits 1. The
+		// remote command has to be built as a single argument, quoted here
+		// rather than by a shell that never sees the boundary.
+		//
+		// archive.remote needs no quoting of its own: validRemotePath restricts
+		// it to alphanumerics plus "/._-", so it cannot carry whitespace.
+		remoteCommand := "sqlite3 -readonly " + archive.remote + " 'PRAGMA quick_check;'"
+		output, err := a.commands.Run(ctx, "ssh", "--", destination.host, remoteCommand)
 		if err != nil {
 			return nil, replicationCommandError("validate the "+archive.name+" replica", err)
 		}
