@@ -107,7 +107,10 @@ func (f *fakeReplicationRunner) Run(_ context.Context, name string, args ...stri
 	f.commands = append(f.commands, recordedCommand{name: name, args: args})
 	key := strings.TrimSpace(name + " " + strings.Join(args, " "))
 	if err, failed := f.failures[key]; failed {
-		return "", err
+		// A real command writes to stderr and then exits non-zero. Returning
+		// the registered output alongside the error keeps that shape, so a
+		// test can check what the failure actually reported.
+		return f.responses[key], err
 	}
 	if response, known := f.responses[key]; known {
 		return response, nil
@@ -343,6 +346,56 @@ func TestReplicateSkipsTrawlersWithNoArchive(t *testing.T) {
 
 // Replication reads archives an update would be rewriting. The two must never
 // overlap.
+// The failure that motivated this reported "ssh: exit status 1" for an archive
+// that was intact, because ssh's status was all the message carried. What the
+// remote command said is the difference between a two-minute fix and a search
+// for a connection problem that was never there.
+func TestReplicationFailureReportsWhatTheCommandSaid(t *testing.T) {
+	const remoteComplaint = "Error: in prepare, incomplete input"
+	runner := &fakeReplicationRunner{}
+	replicator, trawlers := replicatorOverStateRoot(t, runner, "whatsapp")
+	destination, err := parseReplicationDestination("host:/srv/replica")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archives, remoteDirs, err := replicator.plan(destination, trawlers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Key the failure on the paths this state root actually produced, so the
+	// test does not depend on where the temporary archive landed.
+	failureKey := "sqlite3_rsync " + archives[0].local + " host:" + archives[0].remote
+	runner.failures = map[string]error{failureKey: errors.New("exit status 1")}
+	runner.responses = map[string]string{failureKey: remoteComplaint}
+
+	_, err = replicator.replicate(context.Background(), destination, archives, remoteDirs)
+	if err == nil {
+		t.Fatal("replication reported success after the copy failed")
+	}
+	if !strings.Contains(err.Error(), remoteComplaint) {
+		t.Fatalf("the failure did not say what the command reported: %v", err)
+	}
+}
+
+// A command that fails with nothing to say must not leave a dangling colon.
+func TestReplicationFailureWithoutOutputStaysReadable(t *testing.T) {
+	if detail := commandFailureDetail("   \n\t "); detail != "" {
+		t.Fatalf("blank output produced a detail: %q", detail)
+	}
+}
+
+// External tools can name private attachment files in their diagnostics, so a
+// failure message stays bounded and on one line.
+func TestReplicationFailureDetailIsBoundedAndSingleLine(t *testing.T) {
+	detail := commandFailureDetail(strings.Repeat("verbose ", 400) + "\nsecond line\n")
+	if strings.ContainsAny(detail, "\n\r") {
+		t.Fatalf("the detail spans lines: %q", detail)
+	}
+	if runes := []rune(detail); len(runes) > maxReplicationCommandDetailRunes+1 {
+		t.Fatalf("the detail is unbounded: %d runes", len(runes))
+	}
+}
+
 func TestReplicationLockIsExclusive(t *testing.T) {
 	stateRoot := t.TempDir()
 	first, err := acquireReplicationLock(stateRoot)
