@@ -7,7 +7,7 @@
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="favicon-48.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<title>OpenTrawl: your entire digital life, searchable by your AI, on your machine</title>
+<title>{{title}}</title>
 <style>
 /* ============================================================
    opentrawl.sh design system
@@ -216,14 +216,14 @@ footer a:hover, footer a:focus-visible { color: var(--red); border-color: var(--
 </svg>
 <div class="wordmark">open<span>trawl</span></div></div>
     <div class="topbar-buttons">
-      <a class="btn-secondary" href="https://github.com/opentrawl/opentrawl">GitHub ↗</a>
-      <a class="btn" href="https://github.com/opentrawl/opentrawl/releases/latest/download/OpenTrawl.dmg">Download for Mac</a>
+      <a class="btn-secondary" href="https://github.com/opentrawl/opentrawl">{{button.github}}</a>
+      <a class="btn" href="https://github.com/opentrawl/opentrawl/releases/latest/download/OpenTrawl.dmg">{{button.download}}</a>
     </div>
   </div>
 
-  <h1>Your AI can't search your <span class="cycle" id="cycle"><span class="word" id="cycleWord">iMessage.</span></span><br>OpenTrawl fixes this.</h1>
+  <h1>{{hero.line1}} <span class="cycle" id="cycle"><span class="word" id="cycleWord">iMessage.</span></span><br>{{hero.line2}}</h1>
   <script>
-    const words = "iMessage., WhatsApp., Telegram., Notes., Contacts., Calendar., Gmail., Photos., Twitter.".split(", ");
+    const words = "{{hero.cycle}}".split(", ");
     let i = 0;
     const slot = document.getElementById("cycle");
     const word = document.getElementById("cycleWord");
@@ -250,13 +250,13 @@ footer a:hover, footer a:focus-visible { color: var(--red); border-color: var(--
     }
   </script>
 
-  <p class="sub"><span>OpenTrawl is a macOS app and a command line tool. It builds you a small index of all the data in your apps (notes, messages, e-mails). You can search it, and so can your (local) AI.</span></p>
-  <p class="privacy">Nothing leaves your machine, unless you want it to.</p>
-  <p class="sources"><b>Available today:</b> iMessage, WhatsApp, Telegram, Notes, Contacts, Calendar.<br>
-  <span class="soon"><b>Coming soon:</b> Gmail, Twitter, Photos.</span></p>
+  <p class="sub"><span>{{hero.sub}}</span></p>
+  <p class="privacy">{{hero.privacy}}</p>
+  <p class="sources">{{sources.today}}<br>
+  <span class="soon">{{sources.soon}}</span></p>
   <div class="hero-ctas">
-    <a class="btn btn-lg" href="https://github.com/opentrawl/opentrawl/releases/latest/download/OpenTrawl.dmg">Download for Mac</a>
-    <a class="btn-secondary btn-lg" href="https://github.com/opentrawl/opentrawl">GitHub ↗</a>
+    <a class="btn btn-lg" href="https://github.com/opentrawl/opentrawl/releases/latest/download/OpenTrawl.dmg">{{button.download}}</a>
+    <a class="btn-secondary btn-lg" href="https://github.com/opentrawl/opentrawl">{{button.github}}</a>
   </div>
 
   <section class="terminal" id="terminal" aria-label="OpenTrawl command-line demo, played with data from Arthur Dent's archive">
@@ -377,28 +377,28 @@ footer a:hover, footer a:focus-visible { color: var(--red); border-color: var(--
     }
   })();
   </script>
-  <p class="term-caption"><span>I took my real archive and told Claude to anonymise it by LARPing as The Hitchhiker's Guide to the Galaxy. The data is real, the names aren't.</span></p>
+  <p class="term-caption"><span>{{terminal.caption}}</span></p>
 
   <section class="facts">
-    <p><b>Private by design</b>
-    <span>Your archives are just files on your Mac. Nothing is uploaded anywhere, we don't know who you are. If you want to point a (local) AI at your archives, <em>you're</em> in control - not a company.</span></p>
-    <p><b>It just works</b>
-    <span>Install the Mac app. It builds search indexes, updates them, and updates the app for you. No npm install hell, no MCP servers, no updates breaking everything.</span></p>
-    <p><b>Open source</b>
-    <span>The code is on GitHub, MIT licensed. Take a look, see how it works. No secrets here.</span></p>
-    <p><b>Plugins - coming soon</b>
-    <span>Want to search something that we haven't built yet? We'll share a skill for your coding agent - so you can write a plugin to search anything you like.</span></p>
+    <p><b>{{fact.1.title}}</b>
+    <span>{{fact.1.body}}</span></p>
+    <p><b>{{fact.2.title}}</b>
+    <span>{{fact.2.body}}</span></p>
+    <p><b>{{fact.3.title}}</b>
+    <span>{{fact.3.body}}</span></p>
+    <p><b>{{fact.4.title}}</b>
+    <span>{{fact.4.body}}</span></p>
   </section>
 
   <section class="cta">
-    <a class="btn btn-lg" href="https://github.com/opentrawl/opentrawl/releases/latest/download/OpenTrawl.dmg">Download for Mac</a>
-    <a class="btn-secondary btn-lg" href="https://github.com/opentrawl/opentrawl">GitHub ↗</a>
+    <a class="btn btn-lg" href="https://github.com/opentrawl/opentrawl/releases/latest/download/OpenTrawl.dmg">{{button.download}}</a>
+    <a class="btn-secondary btn-lg" href="https://github.com/opentrawl/opentrawl">{{button.github}}</a>
   </section>
 
   <footer>
     <a href="https://github.com/opentrawl/opentrawl">github.com/opentrawl</a>
     <a href="https://x.com/opentrawl">x.com/opentrawl</a>
-    <div class="byline"><span>Built by <a href="https://x.com/jjpcodes">Josh Palmer</a> · OpenClaw community maintainer · ex Spotify · made in rotterdam 🇳🇱</span></div>
+    <div class="byline"><span>{{footer.byline}}</span></div>
   </footer>
 </main>
 </body>
