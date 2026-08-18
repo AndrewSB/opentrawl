@@ -319,6 +319,15 @@ public nonisolated struct Trawl_CalendarEvent_CalendarEventRecord: @unchecked Se
     set {_uniqueStorage()._calendarEventDescriptionIsTruncated = newValue}
   }
 
+  public var calendarOwnerOrPurposeAnnotation: Trawl_Calendar_CalendarOwnerOrPurposeAnnotation {
+    get {_storage._calendarOwnerOrPurposeAnnotation ?? Trawl_Calendar_CalendarOwnerOrPurposeAnnotation()}
+    set {_uniqueStorage()._calendarOwnerOrPurposeAnnotation = newValue}
+  }
+  /// Returns true if `calendarOwnerOrPurposeAnnotation` has been explicitly set.
+  public var hasCalendarOwnerOrPurposeAnnotation: Bool {_storage._calendarOwnerOrPurposeAnnotation != nil}
+  /// Clears the value of `calendarOwnerOrPurposeAnnotation`. Subsequent reads from it will return its default value.
+  public mutating func clearCalendarOwnerOrPurposeAnnotation() {_uniqueStorage()._calendarOwnerOrPurposeAnnotation = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -436,7 +445,7 @@ nonisolated extension Trawl_CalendarEvent_CalendarEventAttendee: SwiftProtobuf.M
 
 nonisolated extension Trawl_CalendarEvent_CalendarEventRecord: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CalendarEventRecord"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}canonical_record_reference\0\u{3}calendar_event_start_time\0\u{3}calendar_event_end_time\0\u{3}calendar_event_display_name\0\u{3}calendar_display_name\0\u{3}calendar_account_display_name\0\u{3}calendar_event_availability\0\u{3}calendar_event_location\0\u{3}calendar_event_organizer\0\u{3}calendar_event_attendees\0\u{3}calendar_event_https_url\0\u{3}calendar_event_status\0\u{3}calendar_event_is_recurring\0\u{3}calendar_event_description\0\u{3}calendar_event_description_is_truncated\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}canonical_record_reference\0\u{3}calendar_event_start_time\0\u{3}calendar_event_end_time\0\u{3}calendar_event_display_name\0\u{3}calendar_display_name\0\u{3}calendar_account_display_name\0\u{3}calendar_event_availability\0\u{3}calendar_event_location\0\u{3}calendar_event_organizer\0\u{3}calendar_event_attendees\0\u{3}calendar_event_https_url\0\u{3}calendar_event_status\0\u{3}calendar_event_is_recurring\0\u{3}calendar_event_description\0\u{3}calendar_event_description_is_truncated\0\u{3}calendar_owner_or_purpose_annotation\0")
 
   fileprivate class _StorageClass {
     var _canonicalRecordReference: Trawl_Identity_CanonicalArchiveRecordReference? = nil
@@ -454,6 +463,7 @@ nonisolated extension Trawl_CalendarEvent_CalendarEventRecord: SwiftProtobuf.Mes
     var _calendarEventIsRecurring: Bool = false
     var _calendarEventDescription: String = String()
     var _calendarEventDescriptionIsTruncated: Bool = false
+    var _calendarOwnerOrPurposeAnnotation: Trawl_Calendar_CalendarOwnerOrPurposeAnnotation? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -479,6 +489,7 @@ nonisolated extension Trawl_CalendarEvent_CalendarEventRecord: SwiftProtobuf.Mes
       _calendarEventIsRecurring = source._calendarEventIsRecurring
       _calendarEventDescription = source._calendarEventDescription
       _calendarEventDescriptionIsTruncated = source._calendarEventDescriptionIsTruncated
+      _calendarOwnerOrPurposeAnnotation = source._calendarOwnerOrPurposeAnnotation
     }
   }
 
@@ -512,6 +523,7 @@ nonisolated extension Trawl_CalendarEvent_CalendarEventRecord: SwiftProtobuf.Mes
         case 13: try { try decoder.decodeSingularBoolField(value: &_storage._calendarEventIsRecurring) }()
         case 14: try { try decoder.decodeSingularStringField(value: &_storage._calendarEventDescription) }()
         case 15: try { try decoder.decodeSingularBoolField(value: &_storage._calendarEventDescriptionIsTruncated) }()
+        case 16: try { try decoder.decodeSingularMessageField(value: &_storage._calendarOwnerOrPurposeAnnotation) }()
         default: break
         }
       }
@@ -569,6 +581,9 @@ nonisolated extension Trawl_CalendarEvent_CalendarEventRecord: SwiftProtobuf.Mes
       if _storage._calendarEventDescriptionIsTruncated != false {
         try visitor.visitSingularBoolField(value: _storage._calendarEventDescriptionIsTruncated, fieldNumber: 15)
       }
+      try { if let v = _storage._calendarOwnerOrPurposeAnnotation {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 16)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -593,6 +608,7 @@ nonisolated extension Trawl_CalendarEvent_CalendarEventRecord: SwiftProtobuf.Mes
         if _storage._calendarEventIsRecurring != rhs_storage._calendarEventIsRecurring {return false}
         if _storage._calendarEventDescription != rhs_storage._calendarEventDescription {return false}
         if _storage._calendarEventDescriptionIsTruncated != rhs_storage._calendarEventDescriptionIsTruncated {return false}
+        if _storage._calendarOwnerOrPurposeAnnotation != rhs_storage._calendarOwnerOrPurposeAnnotation {return false}
         return true
       }
       if !storagesAreEqual {return false}

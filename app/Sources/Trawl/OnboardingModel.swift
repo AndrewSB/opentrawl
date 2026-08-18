@@ -87,6 +87,7 @@ final class OnboardingModel {
   }
 
   func showWelcome() {
+    FullDiskAccessGuide.dismiss()
     permissionTask?.cancel()
     permissionTask = nil
     permissionCheck = .idle
@@ -268,6 +269,23 @@ final class OnboardingModel {
     defaults.removeObject(forKey: Self.checkpointOwnerKey)
     stage = .complete
     isAwaitingPermissionReturn = false
+  }
+
+  func reset() {
+    FullDiskAccessGuide.dismiss()
+    permissionTask?.cancel()
+    permissionTask = nil
+    updateTask?.cancel()
+    updateTask = nil
+    permissionCheck = .idle
+    isAwaitingPermissionReturn = false
+    hasStartedArchiveBuild = false
+    shouldResumeInitialUpdate = false
+    hasCopiedAIInstructions = false
+    defaults.removeObject(forKey: Self.completionKey)
+    defaults.removeObject(forKey: Self.checkpointKey)
+    defaults.removeObject(forKey: Self.checkpointOwnerKey)
+    stage = .welcome
   }
 
   private func startPermissionChecks(

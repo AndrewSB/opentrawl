@@ -15,9 +15,12 @@ struct OnboardingView: View {
   var body: some View {
     switch onboarding.stage {
     case .welcome:
-      WelcomeStep {
-        onboarding.showPermission(appModel: appModel)
-      }
+      WelcomeStep(
+        registeredTrawlerCatalog: appModel.registeredTrawlerCatalog,
+        onContinue: {
+          onboarding.showPermission(appModel: appModel)
+        }
+      )
     case .permission:
       PermissionStep(
         permissionCheck: onboarding.permissionCheck,
@@ -98,6 +101,7 @@ struct OnboardingView: View {
 
 struct WelcomeStep: View {
   var icon = NSApplication.shared.applicationIconImage
+  let registeredTrawlerCatalog: [RegisteredTrawlerCatalogEntry]
   let onContinue: () -> Void
 
   var body: some View {
@@ -107,14 +111,17 @@ struct WelcomeStep: View {
       contentWidth: TrawlDesign.onboardingPageWidth
     ) {
       OnboardingHeroLayout {
-        VStack(spacing: 24) {
+        VStack(spacing: 0) {
           WelcomeMark(icon: icon)
           OnboardingProse(
-            title: DraftCopy.Welcome.title,
-            lede: DraftCopy.Welcome.body,
-            statement: DraftCopy.Welcome.privacy,
+            title: HumanCopy.Welcome.title,
+            lede: HumanCopy.Welcome.body,
+            statement: HumanCopy.Welcome.privacy,
             centred: true
           )
+          .padding(.top, 24)
+          WelcomeAppIconRow(registeredTrawlerCatalog: registeredTrawlerCatalog)
+            .padding(.top, TrawlDesign.onboardingBlockSpacing)
         }
       }
     } actions: {
@@ -122,10 +129,79 @@ struct WelcomeStep: View {
         backAction: nil,
         secondaryTitle: nil,
         secondaryAction: nil,
-        primaryTitle: DraftCopy.Welcome.primaryAction,
+        primaryTitle: HumanCopy.Welcome.primaryAction,
         primaryAction: onContinue
       )
     }
+  }
+}
+
+private struct WelcomeAppIconRow: View {
+  let registeredTrawlerCatalog: [RegisteredTrawlerCatalogEntry]
+
+  private var searchableEntries: [RegisteredTrawlerCatalogEntry] {
+    registeredTrawlerCatalog.filter {
+      $0.registeredTrawlerReleaseState != .comingSoon
+    }
+  }
+
+  private var comingSoonEntries: [RegisteredTrawlerCatalogEntry] {
+    registeredTrawlerCatalog.filter {
+      $0.registeredTrawlerReleaseState == .comingSoon
+    }
+  }
+
+  var body: some View {
+    VStack(spacing: TrawlDesign.onboardingElementSpacing) {
+      Text(HumanCopy.Welcome.appsTitle)
+        .trawlText(.sectionHeader)
+      HStack(spacing: 32) {
+        HStack(spacing: 20) {
+          ForEach(searchableEntries, id: \.id) { entry in
+            WelcomeAppIcon(entry: entry)
+          }
+        }
+        if !comingSoonEntries.isEmpty {
+          HStack(spacing: 20) {
+            ForEach(comingSoonEntries, id: \.id) { entry in
+              WelcomeAppIcon(entry: entry)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+private struct WelcomeAppIcon: View {
+  let entry: RegisteredTrawlerCatalogEntry
+
+  private var isComingSoon: Bool {
+    entry.registeredTrawlerReleaseState == .comingSoon
+  }
+
+  private var appName: String {
+    entry.registeredTrawlerManifest.registeredTrawlerDisplayName
+  }
+
+  var body: some View {
+    TrawlerIconView(registeredTrawler: entry.id, size: 48)
+      .overlay(alignment: .bottomTrailing) {
+        if isComingSoon {
+          Image(systemName: "clock.fill")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 17, height: 17)
+            .background(.secondary, in: Circle())
+            .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 2))
+            .offset(x: 3, y: 3)
+            .accessibilityHidden(true)
+        }
+      }
+      .opacity(isComingSoon ? 0.72 : 1)
+      .help(isComingSoon ? "\(appName) · \(HumanCopy.AppStatus.comingSoon)" : appName)
+      .accessibilityLabel(appName)
+      .accessibilityValue(isComingSoon ? HumanCopy.AppStatus.comingSoon : "")
   }
 }
 
@@ -161,9 +237,9 @@ struct PermissionStep: View {
     ) {
       OnboardingTaskLayout {
         OnboardingProse(
-          title: DraftCopy.FullDiskAccess.title,
-          lede: DraftCopy.FullDiskAccess.body,
-          statement: DraftCopy.FullDiskAccess.purpose
+          title: HumanCopy.FullDiskAccess.title,
+          lede: HumanCopy.FullDiskAccess.body,
+          statement: HumanCopy.FullDiskAccess.purpose
         )
       } task: {
         VStack(alignment: .leading, spacing: 20) {
@@ -175,7 +251,7 @@ struct PermissionStep: View {
             )
         }
       } support: {
-        OnboardingInformationGroup(title: DraftCopy.FullDiskAccess.trustGroupTitle) {
+        OnboardingInformationGroup(title: HumanCopy.FullDiskAccess.trustGroupTitle) {
           TrustReview(
             buildIdentity: buildIdentity,
             copiedAuditPrompt: $copiedAuditPrompt
@@ -189,7 +265,7 @@ struct PermissionStep: View {
         secondaryAction: nil,
         primaryTitle: permissionCheck == .confirmed
           ? OperationalCopy.SharedAction.continueAction
-          : OperationalCopy.FullDiskAccess.open,
+          : HumanCopy.FullDiskAccess.openAction,
         primaryAction: permissionCheck == .confirmed ? onContinue : onOpenSettings
       )
     }
@@ -221,7 +297,7 @@ private struct PermissionDragDemonstration: View {
       }
     }
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel(DraftCopy.FullDiskAccess.dragAccessibilityLabel)
+    .accessibilityLabel(HumanCopy.FullDiskAccess.dragAccessibilityLabel)
   }
 
   private var animationLane: some View {
@@ -246,7 +322,7 @@ private struct PermissionDragDemonstration: View {
     Image(
       nsImage: icon ?? NSImage(
         systemSymbolName: "shippingbox.fill",
-        accessibilityDescription: OperationalCopy.FullDiskAccess.openTrawl
+        accessibilityDescription: HumanCopy.FullDiskAccess.openTrawlLabel
       )!
     )
     .resizable()
@@ -275,9 +351,9 @@ private struct PermissionDragDemonstration: View {
 
   private var permissionList: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text(OperationalCopy.FullDiskAccess.systemSettings)
+      Text(HumanCopy.FullDiskAccess.systemSettingsLabel)
         .trawlText(.sectionHeader)
-      Text(OperationalCopy.FullDiskAccess.addAppStep)
+      Text(HumanCopy.FullDiskAccess.addAppStep)
         .trawlText(.body)
         .foregroundStyle(.secondary)
     }
@@ -298,7 +374,7 @@ private struct PermissionStatus: View {
         Text(label)
           .trawlText(.body)
         if state == .notConfirmed {
-          Text(OperationalCopy.FullDiskAccess.recovery)
+          Text(OperationalCopy.FullDiskAccess.instruction)
             .trawlText(.meta)
             .foregroundStyle(.secondary)
         }
@@ -308,7 +384,7 @@ private struct PermissionStatus: View {
 
   private var label: String {
     switch state {
-    case .idle: "Full Disk Access is not confirmed yet"
+    case .idle: OperationalCopy.FullDiskAccess.idle
     case .checking: OperationalCopy.FullDiskAccess.checking
     case .confirmed: OperationalCopy.FullDiskAccess.confirmed
     case .notConfirmed: OperationalCopy.FullDiskAccess.notConfirmed
@@ -339,7 +415,7 @@ private struct TrustReview: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Text(DraftCopy.FullDiskAccess.trustGroupBody)
+      Text(HumanCopy.FullDiskAccess.trustGroupBody)
         .trawlText(.body)
         .lineSpacing(2)
         .foregroundStyle(.secondary)
@@ -349,7 +425,7 @@ private struct TrustReview: View {
           NSWorkspace.shared.open(BuildIdentity.repositoryURL)
         } label: {
           Label(
-            DraftCopy.FullDiskAccess.readCodeAction,
+            HumanCopy.FullDiskAccess.readCodeAction,
             systemImage: "arrow.up.right.square"
           )
         }
@@ -363,9 +439,9 @@ private struct TrustReview: View {
         } label: {
           Label(
             copiedAuditPrompt
-              ? OperationalCopy.Trust.copiedAuditPrompt
-              : OperationalCopy.Trust.copyAuditPrompt,
-            systemImage: "doc.on.doc"
+              ? HumanCopy.FullDiskAccess.copiedAuditPromptAction
+              : HumanCopy.FullDiskAccess.copyAuditPromptAction,
+            systemImage: copiedAuditPrompt ? "checkmark" : "doc.on.doc"
           )
         }
         .disabled(copiedAuditPrompt)
@@ -434,15 +510,15 @@ struct BuildStep: View {
       VStack(alignment: .leading, spacing: TrawlDesign.onboardingSectionSpacing) {
         OnboardingProse(
           title: archiveIsReady
-            ? DraftCopy.ArchiveBuild.readyTitle
-            : DraftCopy.ArchiveBuild.title,
+            ? HumanCopy.ArchiveBuild.readyTitle
+            : HumanCopy.ArchiveBuild.title,
           lede: archiveIsReady
-            ? DraftCopy.ArchiveBuild.readyBody
-            : DraftCopy.ArchiveBuild.body
+            ? HumanCopy.ArchiveBuild.readyBody
+            : HumanCopy.ArchiveBuild.body
         )
+        .frame(height: 100, alignment: .topLeading)
         AIConnectionPanel(
           hasCopied: hasCopiedAIInstructions,
-          isPrimary: appModel.isUpdating && !hasSearchableArchive,
           onCopy: copyAIInstructions
         )
         ArchiveBuildStatus(
@@ -460,7 +536,7 @@ struct BuildStep: View {
         backAction: onBack,
         secondaryTitle: appModel.isUpdating ? OperationalCopy.SharedAction.cancel : nil,
         secondaryAction: appModel.isUpdating ? onStop : nil,
-        primaryTitle: OperationalCopy.SharedAction.continueAction,
+        primaryTitle: HumanCopy.ArchiveBuild.startSearchingAction,
         primaryAction: onFinish,
         primaryDisabled: !canFinishSetup
       )
@@ -525,26 +601,14 @@ private struct ArchiveTrawlerSummary: View {
     presentations.count { $0.1.status == .success || $0.1.status == .warning }
   }
 
-  private var workingCount: Int {
-    presentations.count { $0.1.status == .working }
-  }
-
-  private var settledCount: Int {
-    presentations.count {
-      $0.1.status == .success || $0.1.status == .warning || $0.1.status == .failure
-    }
-  }
-
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       HStack(alignment: .firstTextBaseline) {
-        Text(OperationalCopy.ArchiveBuild.yourApps)
+        Text(HumanCopy.ArchiveBuild.yourAppsTitle)
           .trawlText(.sectionHeader)
         Spacer()
         ArchiveProgressSummary(
           searchableCount: searchableCount,
-          workingCount: workingCount,
-          settledCount: settledCount,
           totalCount: presentations.count
         )
       }
@@ -559,7 +623,7 @@ private struct ArchiveTrawlerSummary: View {
         )
       }
       if !comingSoonEntries.isEmpty {
-        Text(OperationalCopy.ArchiveBuild.moreApps)
+        Text(HumanCopy.ArchiveBuild.moreAppsTitle)
           .trawlText(.sectionHeader)
           .padding(.top, TrawlDesign.onboardingSubgroupSpacing)
         AppBuildList(
@@ -580,10 +644,10 @@ private struct ArchiveTrawlerSummary: View {
     let trawlerStatus = appModel.trawlerStatuses.first {
       $0.id == registeredTrawler
     }
-    let failure =
-      appModel.updateOperationFailures.first {
-        $0.failedTrawler == registeredTrawler
-      }
+    let updateFailure = appModel.updateOperationFailures.first {
+      $0.failedTrawler == registeredTrawler
+    }
+    let failure = updateFailure
       ?? appModel.statusOperationFailures.first {
         $0.failedTrawler == registeredTrawler
       }
@@ -601,6 +665,7 @@ private struct ArchiveTrawlerSummary: View {
         trawlerStatus?.archiveContentCountsAfterLastSuccessfullyCompletedUpdate ?? [],
       progress: appModel.updateProgress[registeredTrawler],
       failure: failure,
+      archiveUpdateFailed: updateFailure != nil,
       skipped: skipped,
       releaseState: catalogEntry?.registeredTrawlerReleaseState,
       isInstalled: appInstallations.isAvailable(registeredTrawler),
@@ -611,8 +676,6 @@ private struct ArchiveTrawlerSummary: View {
 
 private struct ArchiveProgressSummary: View {
   let searchableCount: Int
-  let workingCount: Int
-  let settledCount: Int
   let totalCount: Int
 
   var body: some View {
@@ -622,13 +685,7 @@ private struct ArchiveProgressSummary: View {
   }
 
   private var summary: String {
-    if workingCount > 0 {
-      return "\(searchableCount) searchable · \(workingCount) building"
-    }
-    if searchableCount == totalCount {
-      return "\(searchableCount) searchable"
-    }
-    return "\(searchableCount) of \(totalCount) searchable"
+    String(format: HumanCopy.ArchiveBuild.progressFormat, searchableCount, totalCount)
   }
 }
 
@@ -650,14 +707,13 @@ private struct InitialLoadRecovery: View {
 
 private struct AIConnectionPanel: View {
   let hasCopied: Bool
-  let isPrimary: Bool
   let onCopy: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text(DraftCopy.ConnectAI.title)
+      Text(HumanCopy.ConnectAI.title)
         .trawlText(.sectionHeader)
-      Text(DraftCopy.ConnectAI.body)
+      Text(HumanCopy.ConnectAI.body)
         .trawlText(.body)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
@@ -665,31 +721,17 @@ private struct AIConnectionPanel: View {
     }
   }
 
-  @ViewBuilder
   private var copyButton: some View {
-    if isPrimary {
-      button
-        .buttonStyle(.borderedProminent)
-        .tint(TrawlDesign.brandRed)
-    } else {
-      button
-        .buttonStyle(.bordered)
-        .tint(.primary)
-    }
-  }
-
-  private var button: some View {
     Button(action: onCopy) {
       Label(
-        hasCopied
-          ? OperationalCopy.ArchiveBuild.copiedAIInstructions
-          : OperationalCopy.ArchiveBuild.copyAIInstructions,
-        systemImage: "doc.on.doc"
+        HumanCopy.ConnectAI.copyAction,
+        systemImage: hasCopied ? "checkmark" : "doc.on.doc"
       )
     }
+    .buttonStyle(.bordered)
     .buttonBorderShape(.capsule)
     .controlSize(.small)
-    .disabled(hasCopied)
+    .tint(.primary)
   }
 }
 
@@ -703,7 +745,7 @@ struct PermissionRecoveryBanner: View {
       VStack(alignment: .leading, spacing: 3) {
         Text(OperationalCopy.FullDiskAccess.needed)
           .trawlText(.sectionHeader)
-        Text(OperationalCopy.FullDiskAccess.recovery)
+        Text(OperationalCopy.FullDiskAccess.instruction)
           .trawlText(.body)
           .foregroundStyle(.secondary)
       }
@@ -732,7 +774,7 @@ private struct AppBuildList: View {
           name: presentation.name,
           status: presentation.status,
           statusLabel: presentation.statusLabel,
-          recoveryTitle: presentation.canRetry ? OperationalCopy.AppStatus.retryApp : nil,
+          recoveryTitle: presentation.canRetry ? HumanCopy.AppStatus.retry : nil,
           recovery: presentation.canRetry ? { onRetryApp(registeredTrawler) } : nil,
           recoveryDisabled: appModel.isUpdating
         )
@@ -743,8 +785,8 @@ private struct AppBuildList: View {
           registeredTrawler: entry.id,
           name: entry.registeredTrawlerManifest.registeredTrawlerDisplayName,
           status: .neutral,
-          statusLabel: OperationalCopy.AppStatus.comingSoon,
-          accessibilityStatus: OperationalCopy.AppStatus.comingSoon,
+          statusLabel: HumanCopy.AppStatus.comingSoon,
+          accessibilityStatus: HumanCopy.AppStatus.comingSoon,
           symbolOverride: "clock",
           recoveryTitle: nil,
           recovery: nil,
@@ -761,10 +803,10 @@ private struct AppBuildList: View {
     let trawlerStatus = appModel.trawlerStatuses.first {
       $0.id == registeredTrawler
     }
-    let failure =
-      appModel.updateOperationFailures.first {
-        $0.failedTrawler == registeredTrawler
-      }
+    let updateFailure = appModel.updateOperationFailures.first {
+      $0.failedTrawler == registeredTrawler
+    }
+    let failure = updateFailure
       ?? appModel.statusOperationFailures.first {
         $0.failedTrawler == registeredTrawler
       }
@@ -782,6 +824,7 @@ private struct AppBuildList: View {
         trawlerStatus?.archiveContentCountsAfterLastSuccessfullyCompletedUpdate ?? [],
       progress: appModel.updateProgress[registeredTrawler],
       failure: failure,
+      archiveUpdateFailed: updateFailure != nil,
       skipped: skipped,
       releaseState: catalogEntry?.registeredTrawlerReleaseState,
       isInstalled: appInstallations.isAvailable(registeredTrawler),
@@ -851,21 +894,28 @@ struct AppBuildRowPresentation: Equatable {
     counts: [ArchiveContentCountAfterLastSuccessfullyCompletedUpdate],
     progress: TrawlerArchiveUpdateProgressState?,
     failure: TrawlerOperationFailure?,
+    archiveUpdateFailed: Bool,
     skipped: TrawlerSkippedFromOperation?,
     releaseState: RegisteredTrawlerReleaseState? = nil,
     isInstalled: Bool,
     suppressPermissionFailure: Bool
   ) -> AppBuildRowPresentation {
-    if releaseState == .comingSoon || skipped != nil {
+    if releaseState == .comingSoon {
       return AppBuildRowPresentation(
         name: name, status: .neutral,
-        statusLabel: OperationalCopy.AppStatus.comingSoon, canRetry: false
+        statusLabel: HumanCopy.AppStatus.comingSoon, canRetry: false
+      )
+    }
+    if skipped != nil {
+      return AppBuildRowPresentation(
+        name: name, status: .neutral,
+        statusLabel: OperationalCopy.AppStatus.notAvailable, canRetry: false
       )
     }
     guard isInstalled else {
       return AppBuildRowPresentation(
         name: name, status: .neutral,
-        statusLabel: OperationalCopy.AppStatus.notInstalled, canRetry: false
+        statusLabel: HumanCopy.AppStatus.notInstalled, canRetry: false
       )
     }
     if suppressPermissionFailure, failure?.failureCode == .permission {
@@ -892,23 +942,30 @@ struct AppBuildRowPresentation: Equatable {
         return AppBuildRowPresentation(
           name: name,
           status: .success,
-          statusLabel: OperationalCopy.AppStatus.searchable,
+          statusLabel: archiveUpdateFailed
+            ? OperationalCopy.AppStatus.searchableWithFailedUpdate
+            : OperationalCopy.AppStatus.searchable,
           canRetry: false
         )
       }
       return AppBuildRowPresentation(
         name: name,
         status: .failure,
-        statusLabel: OperationalCopy.AppStatus.failed,
+        statusLabel: archiveUpdateFailed
+          ? OperationalCopy.AppStatus.updateFailed
+          : OperationalCopy.AppStatus.notSearchable,
         canRetry: failure.failureCode != .authentication
           && failure.failureCode != .invalidInput
       )
     }
     if case .failed = progress {
+      let hasArchive = counts.contains { $0.archiveContentCount > 0 }
       return AppBuildRowPresentation(
         name: name,
-        status: .failure,
-        statusLabel: OperationalCopy.AppStatus.failed,
+        status: hasArchive ? .success : .failure,
+        statusLabel: hasArchive
+          ? OperationalCopy.AppStatus.searchableWithFailedUpdate
+          : OperationalCopy.AppStatus.updateFailed,
         canRetry: true
       )
     }

@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	conversationListMaximumWrappedLines                      = 2
-	conversationListLinkMinimumWidth                         = 5
-	maximumConversationParticipantDisplayNamesInHumanPreview = 4
+	conversationListMaximumWrappedLines                             = 2
+	conversationListLinkMinimumWidth                                = 5
+	conversationListPeopleMaximumWidth                              = 120
+	maximumConversationParticipantDisplayNamesInCompactHumanPreview = 4
 )
 
 func WriteConversationListResponse(
@@ -160,8 +161,9 @@ func writeConversations(
 			trawler:      strings.TrimSpace(conversation.trawlerDisplayName),
 			link:         globallyRoutableTrawlLinkText(conversation.globallyRoutableTrawlLink),
 			conversation: conversationDisplayName,
-			people: ConversationParticipantDisplayNamesPreviewForHumanOutput(
+			people: conversationParticipantDisplayNamesAndHiddenCount(
 				peopleDisplayNamesForHumanOutput,
+				len(peopleDisplayNamesForHumanOutput),
 				numberOfPeopleForHumanOutput,
 			),
 			peopleDisplayNamesForHumanOutput: peopleDisplayNamesForHumanOutput,
@@ -182,6 +184,7 @@ func writeConversations(
 	showUnread := anyConversationListCell(rows, func(row conversationListRow) string { return row.unread })
 	columns := make([]TableColumn, 0, 6)
 	whenColumnIndex := -1
+	conversationColumnIndex := -1
 	trawlerColumnIndex := -1
 	peopleColumnIndex := -1
 	unreadColumnIndex := -1
@@ -190,6 +193,7 @@ func writeConversations(
 		columns = append(columns, TableColumn{Header: "when", KeepWholeTokensWhenTerminalWidthAllows: true})
 	}
 	if showConversation {
+		conversationColumnIndex = len(columns)
 		columns = append(columns, TableColumn{
 			Header: "conversation", Wrap: true, MaximumWrappedLines: conversationListMaximumWrappedLines,
 		})
@@ -209,7 +213,9 @@ func writeConversations(
 	}
 	if showTrawler {
 		trawlerColumnIndex = len(columns)
-		columns = append(columns, TableColumn{Header: "trawler"})
+		columns = append(columns, TableColumn{
+			Header: "trawler", Wrap: true, MaximumWrappedLines: conversationListMaximumWrappedLines,
+		})
 	}
 	if showLink {
 		columns = append(columns, TableColumn{
@@ -240,11 +246,23 @@ func writeConversations(
 		tableRows = append(tableRows, values)
 	}
 	outputWidth := OutputWidth(writer)
+	primaryHumanContentColumnIndex := conversationColumnIndex
+	if primaryHumanContentColumnIndex < 0 {
+		primaryHumanContentColumnIndex = peopleColumnIndex
+	}
 	renderColumns := conversationListRenderColumns(
 		columns,
 		tableRows,
 		outputWidth,
+		primaryHumanContentColumnIndex,
 		[]int{trawlerColumnIndex, unreadColumnIndex, whenColumnIndex},
+	)
+	balanceConversationIdentityAndPeopleColumns(
+		renderColumns,
+		columns,
+		tableRows,
+		conversationColumnIndex,
+		peopleColumnIndex,
 	)
 	if peopleColumnIndex >= 0 {
 		for rowIndex := range rows {
@@ -252,17 +270,6 @@ func writeConversations(
 				rows[rowIndex],
 				renderColumns[peopleColumnIndex],
 			)
-		}
-	}
-	if showLink {
-		if err := WriteTrawlCommandHint(
-			writer,
-			"Messages: "+trawlCommandLineForDisplay(writer, []string{"messages", "--conversation", "LINK"}),
-		); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintln(writer); err != nil {
-			return err
 		}
 	}
 	if err := writeRenderHeader(writer, renderColumns); err != nil {
@@ -307,19 +314,6 @@ func conversationParticipantDisplayNamesFromIdentitiesObservedByTrawlerArchive(
 	return displayNames
 }
 
-func conversationParticipantDisplayNamesWithUnavailableCount(
-	conversationParticipantDisplayNames []string,
-	numberOfDistinctConversationParticipantRecordsObservedByTrawlerArchive *uint64,
-) string {
-	return ConversationParticipantDisplayNamesPreviewForHumanOutput(
-		conversationParticipantDisplayNames,
-		resolveNumberOfDistinctConversationParticipantRecordsForHumanOutput(
-			conversationParticipantDisplayNames,
-			numberOfDistinctConversationParticipantRecordsObservedByTrawlerArchive,
-		),
-	)
-}
-
 func resolveNumberOfDistinctConversationParticipantRecordsForHumanOutput(
 	conversationParticipantDisplayNames []string,
 	numberOfDistinctConversationParticipantRecordsObservedByTrawlerArchive *uint64,
@@ -347,8 +341,8 @@ func ConversationParticipantDisplayNamesPreviewForHumanOutput(
 		return ""
 	}
 	numberOfConversationParticipantDisplayNamesInPreview := len(conversationParticipantDisplayNames)
-	if numberOfConversationParticipantDisplayNamesInPreview > maximumConversationParticipantDisplayNamesInHumanPreview {
-		numberOfConversationParticipantDisplayNamesInPreview = maximumConversationParticipantDisplayNamesInHumanPreview
+	if numberOfConversationParticipantDisplayNamesInPreview > maximumConversationParticipantDisplayNamesInCompactHumanPreview {
+		numberOfConversationParticipantDisplayNamesInPreview = maximumConversationParticipantDisplayNamesInCompactHumanPreview
 	}
 	return conversationParticipantDisplayNamesAndHiddenCount(
 		conversationParticipantDisplayNames,
@@ -405,6 +399,7 @@ func conversationListRenderColumns(
 	columns []TableColumn,
 	rows [][]string,
 	outputWidth int,
+	primaryHumanContentColumnIndex int,
 	columnIndexesToHideBeforeNarrowingHumanContextBelowItsMinimumWidth []int,
 ) []renderColumn {
 	naturalTableWidth := DisplayWidth(renderTableGap) * max(0, len(columns)-1)
@@ -416,13 +411,22 @@ func conversationListRenderColumns(
 			columnIndex,
 		)
 	}
-	renderColumns := tableRenderColumns(columns, rows, naturalTableWidth)
+	renderColumns := tableRenderColumnsWithPrimaryHumanContentColumn(
+		columns,
+		rows,
+		naturalTableWidth,
+		primaryHumanContentColumnIndex,
+	)
 	for _, columnIndex := range columnIndexesToHideBeforeNarrowingHumanContextBelowItsMinimumWidth {
 		if columnIndex >= 0 && columnIndex < len(renderColumns) {
 			renderColumns[columnIndex].HideBeforeTruncatingOtherColumnsBelowMinimumWidth = true
 		}
 	}
-	fitRenderColumns(renderColumns, outputWidth)
+	fitRenderColumnsWithPrimaryHumanContentColumn(
+		renderColumns,
+		outputWidth,
+		primaryHumanContentColumnIndex,
+	)
 	return renderColumns
 }
 
@@ -430,10 +434,7 @@ func peopleDisplayNamesForRenderedPeopleColumn(
 	row conversationListRow,
 	peopleColumn renderColumn,
 ) string {
-	numberOfPeopleDisplayNamesToShow := min(
-		len(row.peopleDisplayNamesForHumanOutput),
-		maximumConversationParticipantDisplayNamesInHumanPreview,
-	)
+	numberOfPeopleDisplayNamesToShow := len(row.peopleDisplayNamesForHumanOutput)
 	for {
 		preview := conversationParticipantDisplayNamesAndHiddenCount(
 			row.peopleDisplayNamesForHumanOutput,
@@ -448,6 +449,125 @@ func peopleDisplayNamesForRenderedPeopleColumn(
 	}
 }
 
+func balanceConversationIdentityAndPeopleColumns(
+	renderColumns []renderColumn,
+	tableColumns []TableColumn,
+	rows [][]string,
+	conversationColumnIndex int,
+	peopleColumnIndex int,
+) {
+	if conversationColumnIndex < 0 || peopleColumnIndex < 0 ||
+		conversationColumnIndex >= len(renderColumns) || peopleColumnIndex >= len(renderColumns) ||
+		renderColumns[conversationColumnIndex].HiddenFromRenderedTable ||
+		renderColumns[peopleColumnIndex].HiddenFromRenderedTable {
+		return
+	}
+	combinedWidth := renderColumns[conversationColumnIndex].Width + renderColumns[peopleColumnIndex].Width
+	minimumConversationWidth := minRenderColumnWidth(renderColumns[conversationColumnIndex])
+	minimumPeopleWidth := minRenderColumnWidth(renderColumns[peopleColumnIndex])
+	if combinedWidth <= minimumConversationWidth+minimumPeopleWidth {
+		return
+	}
+	naturalConversationWidth := naturalTableColumnWidth(
+		strings.ToLower(strings.TrimSpace(tableColumns[conversationColumnIndex].Header)),
+		tableColumns[conversationColumnIndex].Wrap,
+		rows,
+		conversationColumnIndex,
+	)
+	naturalPeopleWidth := naturalTableColumnWidth(
+		strings.ToLower(strings.TrimSpace(tableColumns[peopleColumnIndex].Header)),
+		tableColumns[peopleColumnIndex].Wrap,
+		rows,
+		peopleColumnIndex,
+	)
+	conversationWidth := min(naturalConversationWidth, max(minimumConversationWidth, combinedWidth/2))
+	peopleWidth := combinedWidth - conversationWidth
+	if peopleWidth > naturalPeopleWidth {
+		conversationWidth += peopleWidth - naturalPeopleWidth
+		peopleWidth = naturalPeopleWidth
+	}
+	if peopleWidth < minimumPeopleWidth {
+		peopleWidth = minimumPeopleWidth
+		conversationWidth = combinedWidth - peopleWidth
+	}
+	if conversationWidth < minimumConversationWidth {
+		conversationWidth = minimumConversationWidth
+		peopleWidth = combinedWidth - conversationWidth
+	}
+	peopleWidth = min(peopleWidth, conversationListPeopleMaximumWidth)
+	renderColumns[conversationColumnIndex].Width = conversationWidth
+	renderColumns[peopleColumnIndex].Width = peopleWidth
+}
+
+func WriteConversationParticipantListResponse(
+	writer io.Writer,
+	response *conversation.ConversationParticipantListResponse,
+) error {
+	if response == nil {
+		return fmt.Errorf("conversation participant list response is missing")
+	}
+	participantRows := response.GetConversationParticipantsInAlphabeticalOrder()
+	if len(participantRows) == 0 {
+		return writeNoConversationParticipantNamesAvailable(writer, response)
+	}
+	rows := make([][]string, 0, len(participantRows))
+	for _, participant := range participantRows {
+		if participant == nil || strings.TrimSpace(participant.GetPersonDisplayName()) == "" {
+			continue
+		}
+		rows = append(rows, []string{
+			strings.TrimSpace(participant.GetPersonDisplayName()),
+			globallyRoutableTrawlLinkText(participant.GetPersonTrawlLinkResolvedAcrossTrawlerArchives()),
+		})
+	}
+	if len(rows) == 0 {
+		return writeNoConversationParticipantNamesAvailable(writer, response)
+	}
+	if err := writeHumanRecordRowsWithPrimaryContentColumn(
+		writer,
+		[]TableColumn{
+			{Header: "person", Wrap: true, MaximumWrappedLines: 2},
+			{Header: "link", MinimumWidth: conversationListLinkMinimumWidth, NeverTruncateCellValues: true},
+		},
+		rows,
+		0,
+	); err != nil {
+		return err
+	}
+	numberOfParticipantNamesUnavailable := int64(
+		response.GetNumberOfDistinctConversationParticipantRecordsObservedByTrawlerArchive(),
+	) - int64(len(rows))
+	if numberOfParticipantNamesUnavailable <= 0 {
+		return nil
+	}
+	_, err := fmt.Fprintf(
+		writer,
+		"\nNames unavailable: %s.\n",
+		FormatInteger(numberOfParticipantNamesUnavailable),
+	)
+	return err
+}
+
+func writeNoConversationParticipantNamesAvailable(
+	writer io.Writer,
+	response *conversation.ConversationParticipantListResponse,
+) error {
+	if _, err := fmt.Fprintln(writer, "No participant names are available."); err != nil {
+		return err
+	}
+	numberOfParticipantNamesUnavailable :=
+		response.GetNumberOfDistinctConversationParticipantRecordsObservedByTrawlerArchive()
+	if numberOfParticipantNamesUnavailable == 0 {
+		return nil
+	}
+	_, err := fmt.Fprintf(
+		writer,
+		"Names unavailable: %s.\n",
+		FormatInteger(int64(numberOfParticipantNamesUnavailable)),
+	)
+	return err
+}
+
 func conversationPeoplePreviewFitsRenderedColumn(preview string, peopleColumn renderColumn) bool {
 	if strings.TrimSpace(preview) == "" {
 		return true
@@ -455,7 +575,7 @@ func conversationPeoplePreviewFitsRenderedColumn(preview string, peopleColumn re
 	if peopleColumn.Width <= 0 {
 		return false
 	}
-	preview = HumanCell(peopleColumn.Header, preview)
+	preview = strings.TrimSpace(preview)
 	if !peopleColumn.Wrap {
 		return DisplayWidth(preview) <= peopleColumn.Width
 	}

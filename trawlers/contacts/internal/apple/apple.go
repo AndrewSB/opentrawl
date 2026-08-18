@@ -78,10 +78,39 @@ type Contact struct {
 	FirstName  string          `json:"first_name"`
 	LastName   string          `json:"last_name"`
 	FullName   string          `json:"full_name"`
-	Emails     []string        `json:"emails"`
-	Phones     []string        `json:"phones"`
+	Card       model.Card      `json:"card,omitzero"`
+	Emails     []LabeledValue  `json:"emails"`
+	Phones     []LabeledValue  `json:"phones"`
 	Addresses  []PostalAddress `json:"addresses,omitempty"`
 	AvatarData []byte          `json:"avatar_data,omitempty"`
+}
+
+// LabeledValue is one repeated card value together with the label the card
+// gave it — "mobile", "work", "home". The label is the difference between a
+// number you can text and a desk phone nobody answers, so it is carried rather
+// than flattened.
+type LabeledValue struct {
+	Value string `json:"value"`
+	Label string `json:"label,omitempty"`
+}
+
+// UnmarshalJSON accepts a bare string as well as an object, because earlier
+// exports and hand-written vCard fixtures wrote these as plain strings.
+func (v *LabeledValue) UnmarshalJSON(data []byte) error {
+	var value string
+	if err := json.Unmarshal(data, &value); err == nil {
+		*v = LabeledValue{Value: value}
+		return nil
+	}
+	var object struct {
+		Value string `json:"value"`
+		Label string `json:"label,omitempty"`
+	}
+	if err := json.Unmarshal(data, &object); err != nil {
+		return err
+	}
+	*v = LabeledValue{Value: object.Value, Label: object.Label}
+	return nil
 }
 
 type PostalAddress struct {
@@ -112,15 +141,15 @@ func (c Contact) Name() string {
 }
 
 func (c Contact) SourceContact(includeAvatar bool) model.SourceContact {
-	out := model.SourceContact{Source: "apple", ExternalID: c.Identifier, Name: c.Name()}
+	out := model.SourceContact{Source: "apple", ExternalID: c.Identifier, Name: c.Name(), Card: c.Card.Clean()}
 	for i, email := range c.Emails {
-		if strings.TrimSpace(email) != "" {
-			out.Emails = append(out.Emails, model.ContactValue{Value: email, Label: "other", Source: "apple", Primary: i == 0})
+		if strings.TrimSpace(email.Value) != "" {
+			out.Emails = append(out.Emails, model.ContactValue{Value: email.Value, Label: contactLabel(email.Label), Source: "apple", Primary: i == 0})
 		}
 	}
 	for i, phone := range c.Phones {
-		if strings.TrimSpace(phone) != "" {
-			out.Phones = append(out.Phones, model.ContactValue{Value: phone, Label: "other", Source: "apple", Primary: i == 0})
+		if strings.TrimSpace(phone.Value) != "" {
+			out.Phones = append(out.Phones, model.ContactValue{Value: phone.Value, Label: contactLabel(phone.Label), Source: "apple", Primary: i == 0})
 		}
 	}
 	for i, address := range c.Addresses {
@@ -135,11 +164,10 @@ func (c Contact) SourceContact(includeAvatar bool) model.SourceContact {
 	return out
 }
 
+// addressLabel keeps a postal address to the small set the archive presents.
+// A postal address is a place, and "home" or "work" is all a reader needs.
 func addressLabel(label string) string {
-	normalized := strings.ToLower(strings.TrimSpace(label))
-	normalized = strings.TrimPrefix(normalized, "_$!<")
-	normalized = strings.TrimSuffix(normalized, ">!$_")
-	switch normalized {
+	switch unwrapAppleLabel(label) {
 	case "home":
 		return "home"
 	case "work":
@@ -147,6 +175,25 @@ func addressLabel(label string) string {
 	default:
 		return "other"
 	}
+}
+
+// contactLabel keeps whatever the card said about a phone or email. Collapsing
+// everything except home and work to "other" threw away the labels the reader
+// had already gone to the trouble of selecting — "mobile", "iphone", "main" —
+// which are exactly the ones worth having: "mobile" is the difference between a
+// number you can text and a desk phone nobody answers.
+func contactLabel(label string) string {
+	if unwrapped := unwrapAppleLabel(label); unwrapped != "" {
+		return unwrapped
+	}
+	return "other"
+}
+
+// unwrapAppleLabel strips the _$!<Label>!$_ wrapper Apple stores labels in.
+func unwrapAppleLabel(label string) string {
+	normalized := strings.ToLower(strings.TrimSpace(label))
+	normalized = strings.TrimPrefix(normalized, "_$!<")
+	return strings.TrimSuffix(normalized, ">!$_")
 }
 
 func ReadFile(path string) ([]Contact, error) {

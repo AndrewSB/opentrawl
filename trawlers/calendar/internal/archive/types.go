@@ -10,6 +10,19 @@ import (
 	"github.com/opentrawl/opentrawl/trawlkit/store"
 )
 
+type CalendarIdentifier string
+
+type CalendarOwnerOrPurposeAnnotation struct {
+	CalendarOwnerOrPurposeDescription           string
+	CalendarOwnerOrPurposeDescriptionStatedDate CalendarOwnerOrPurposeDescriptionStatedDate
+}
+
+type CalendarOwnerOrPurposeDescriptionStatedDate struct {
+	CalendarYear        int32
+	CalendarMonthNumber int32
+	CalendarDayOfMonth  int32
+}
+
 const (
 	AppID       = "calendar"
 	DisplayName = "Calendar"
@@ -18,19 +31,18 @@ const (
 )
 
 type Calendar struct {
-	ID                 string
-	SourceRowID        int64
-	Title              string
-	Type               int64
-	ExternalID         string
-	StoreID            int64
-	AccountName        string
-	AccountType        int64
-	AccountDisabled    bool
-	Meaning            string
-	MeaningStatedAt    string
-	EventCount         int64
-	UpcomingEventCount int64
+	ID                               CalendarIdentifier
+	SourceRowID                      int64
+	Title                            string
+	Type                             int64
+	ExternalID                       string
+	StoreID                          int64
+	AccountName                      string
+	AccountType                      int64
+	AccountDisabled                  bool
+	CalendarOwnerOrPurposeAnnotation *CalendarOwnerOrPurposeAnnotation
+	EventCount                       int64
+	ActiveOrFutureEventCount         int64
 }
 
 type Person struct {
@@ -51,10 +63,13 @@ type Attendee struct {
 }
 
 type WhoCandidate struct {
-	Who         string   `json:"who"`
-	Identifiers []string `json:"identifiers"`
-	LastSeen    string   `json:"last_seen"`
-	Messages    int64    `json:"messages"`
+	Who                              string   `json:"who"`
+	Identifiers                      []string `json:"identifiers"`
+	LastSeen                         string   `json:"last_seen"`
+	Messages                         int64    `json:"messages"`
+	personEmailAddresses             []string
+	personPhoneNumbers               []string
+	calendarPersonAccountIdentifiers []string
 	// filterIdentifiers are the identifiers that belong to exactly this
 	// entity. A shared mailbox stays in Identifiers for display and query
 	// matching, but filtering events by it would pull in the other entities
@@ -100,10 +115,10 @@ type Location struct {
 }
 
 type CalendarProvenance struct {
-	ID         string `json:"id"`
-	Title      string `json:"title"`
-	Type       int64  `json:"type"`
-	ExternalID string `json:"external_id,omitempty"`
+	ID         CalendarIdentifier `json:"id"`
+	Title      string             `json:"title"`
+	Type       int64              `json:"type"`
+	ExternalID string             `json:"external_id,omitempty"`
 }
 
 type AccountProvenance struct {
@@ -176,15 +191,17 @@ type SearchResult struct {
 }
 
 type EventListItem struct {
-	Ref       string     `json:"ref"`
-	Start     string     `json:"start"`
-	End       string     `json:"end"`
-	AllDay    bool       `json:"all_day"`
-	Title     string     `json:"title"`
-	Calendar  string     `json:"calendar,omitempty"`
-	Location  *Location  `json:"location,omitempty"`
-	Organizer Person     `json:"organizer,omitempty"`
-	Attendees []Attendee `json:"attendees,omitempty"`
+	Ref                              string `json:"ref"`
+	Start                            string `json:"start"`
+	End                              string `json:"end"`
+	AllDay                           bool   `json:"all_day"`
+	Title                            string `json:"title"`
+	Calendar                         string `json:"calendar,omitempty"`
+	Account                          string `json:"account,omitempty"`
+	CalendarOwnerOrPurposeAnnotation *CalendarOwnerOrPurposeAnnotation
+	Location                         *Location  `json:"location,omitempty"`
+	Organizer                        Person     `json:"organizer,omitempty"`
+	Attendees                        []Attendee `json:"attendees,omitempty"`
 }
 
 type SearchMatch struct {
@@ -193,24 +210,25 @@ type SearchMatch struct {
 }
 
 type EventDetail struct {
-	Ref                  string     `json:"ref"`
-	UUID                 string     `json:"uuid"`
-	UniqueIdentifier     string     `json:"unique_identifier,omitempty"`
-	Title                string     `json:"title"`
-	Description          string     `json:"description,omitempty"`
-	DescriptionTruncated bool       `json:"description_truncated,omitempty"`
-	Start                string     `json:"start"`
-	End                  string     `json:"end"`
-	AllDay               bool       `json:"all_day"`
-	Calendar             string     `json:"calendar"`
-	Account              string     `json:"account"`
-	Availability         *int64     `json:"availability,omitempty"`
-	Location             *Location  `json:"location,omitempty"`
-	Organizer            Person     `json:"organizer,omitempty"`
-	Attendees            []Attendee `json:"attendees,omitempty"`
-	URL                  string     `json:"url,omitempty"`
-	Status               string     `json:"status,omitempty"`
-	HasRecurrences       bool       `json:"has_recurrences"`
+	Ref                              string `json:"ref"`
+	UUID                             string `json:"uuid"`
+	UniqueIdentifier                 string `json:"unique_identifier,omitempty"`
+	Title                            string `json:"title"`
+	Description                      string `json:"description,omitempty"`
+	DescriptionTruncated             bool   `json:"description_truncated,omitempty"`
+	Start                            string `json:"start"`
+	End                              string `json:"end"`
+	AllDay                           bool   `json:"all_day"`
+	Calendar                         string `json:"calendar"`
+	Account                          string `json:"account"`
+	CalendarOwnerOrPurposeAnnotation *CalendarOwnerOrPurposeAnnotation
+	Availability                     *int64     `json:"availability,omitempty"`
+	Location                         *Location  `json:"location,omitempty"`
+	Organizer                        Person     `json:"organizer,omitempty"`
+	Attendees                        []Attendee `json:"attendees,omitempty"`
+	URL                              string     `json:"url,omitempty"`
+	Status                           string     `json:"status,omitempty"`
+	HasRecurrences                   bool       `json:"has_recurrences"`
 }
 
 func (e Event) Fingerprint() string {
@@ -256,6 +274,25 @@ func (e Event) Fingerprint() string {
 
 func RefForUID(uid string) string {
 	return AppID + ":event/" + strings.TrimSpace(uid)
+}
+
+func CalendarCanonicalRecordReferenceForIdentifier(calendarIdentifier CalendarIdentifier) string {
+	return AppID + ":calendar/" + strings.TrimSpace(string(calendarIdentifier))
+}
+
+func CalendarIdentifierFromCanonicalRecordReference(
+	canonicalCalendarRecordReference string,
+) (CalendarIdentifier, bool) {
+	value := strings.TrimSpace(canonicalCalendarRecordReference)
+	prefix := AppID + ":calendar/"
+	if !strings.HasPrefix(value, prefix) {
+		return CalendarIdentifier(""), false
+	}
+	calendarIdentifierText := strings.TrimSpace(strings.TrimPrefix(value, prefix))
+	if calendarIdentifierText == "" || strings.ContainsAny(calendarIdentifierText, "\r\n\t") {
+		return CalendarIdentifier(""), false
+	}
+	return CalendarIdentifier(calendarIdentifierText), true
 }
 
 func UIDFromRef(ref string) (string, bool) {

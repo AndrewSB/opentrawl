@@ -94,8 +94,8 @@ type messageFlagValues struct {
 func (c *Crawler) bindMessageFlags(fs *flag.FlagSet) {
 	c.messageFlags = messageFlagValues{}
 	fs.StringVar(&c.messageFlags.sender, "sender", "", "Show only messages from `PERSON`")
-	fs.StringVar(&c.messageFlags.after, "after", "", "Messages on or after `DATE`")
-	fs.StringVar(&c.messageFlags.before, "before", "", "Messages on or before `DATE_OR_TIME`")
+	fs.StringVar(&c.messageFlags.after, "after", "", "Show only messages on or after `DATE`")
+	fs.StringVar(&c.messageFlags.before, "before", "", "Show only messages on or before `DATE_OR_TIME`")
 	fs.BoolVar(&c.messageFlags.fromMe, "from-me", false, "Show only messages sent by you")
 	fs.BoolVar(&c.messageFlags.fromThem, "from-them", false, "Show only messages sent by other people")
 	fs.BoolVar(&c.messageFlags.hasMedia, "has-media", false, "Show only messages with media")
@@ -179,15 +179,15 @@ func (c *Crawler) ListMessages(
 	for _, message := range messages {
 		messageRecords = append(messageRecords, projectMessageRecord(message))
 	}
-	scopedConversationDisplayContext := ""
+	conversationDisplayNameForRestrictedMessageRecords := ""
 	if filter.ChatJID != "" && len(messages) > 0 {
-		scopedConversationDisplayContext = messageWhere(messages[0])
+		conversationDisplayNameForRestrictedMessageRecords = messageWhere(messages[0])
 	}
 	return &message.MessageListResponse{
-		MessageRecordsInDisplayOrder: messageRecords,
-		TotalMatchingMessageCount:    uint64(total),
-		MoreMatchingMessagesExist:    total > len(messages),
-		ConversationDisplayContextWhenMessagesAreRestrictedToOneConversation: scopedConversationDisplayContext,
+		MessageRecordsNewestFirst: messageRecords,
+		TotalMatchingMessageCount: uint64(total),
+		MoreMatchingMessagesExist: total > len(messages),
+		ConversationDisplayNameForMessageRecordsRestrictedToOneConversation: conversationDisplayNameForRestrictedMessageRecords,
 	}, nil
 }
 

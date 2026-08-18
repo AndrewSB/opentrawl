@@ -691,6 +691,7 @@ func cleanSourceContact(source string, contact model.SourceContact) model.Source
 	contact.Source = source
 	contact.ExternalID = strings.TrimSpace(contact.ExternalID)
 	contact.Name = strings.Join(strings.Fields(contact.Name), " ")
+	contact.Card = contact.Card.Clean()
 	contact.Tags = cleanStrings(contact.Tags)
 	emailAddressesWithoutMailtoURIScheme := append([]model.ContactValue(nil), contact.Emails...)
 	for emailAddressIndex := range emailAddressesWithoutMailtoURIScheme {
@@ -739,6 +740,10 @@ func personFromSourceContact(contact model.SourceContact, now time.Time) model.P
 }
 
 func addSourceContactProjection(person model.Person, contact model.SourceContact, now time.Time) model.Person {
+	// Fill rather than replace: sources merge in a stable order, so the first
+	// source to state a card field owns it and a later sparse card cannot blank
+	// a name the person is already findable by.
+	person.Card = person.Card.Fill(contact.Card)
 	person.Tags = appendMissingStrings(person.Tags, contact.Tags)
 	person.Emails = appendMissingValues(person.Emails, contact.Emails, contact.Source, model.NormalizeEmail)
 	person.Phones = appendMissingValues(person.Phones, contact.Phones, contact.Source, model.NormalizePhone)
@@ -837,7 +842,7 @@ func sameSourceContact(a, b model.SourceContact) bool {
 }
 
 func personHasNoIndependentContent(ctx context.Context, s *Store, person model.Person) bool {
-	if person.Annotation != "" || person.Body != "" || len(person.Sources) > 0 || len(person.Emails) > 0 || len(person.Phones) > 0 || len(person.Addresses) > 0 || len(person.Accounts) > 0 || len(person.Tags) > 0 {
+	if person.PersonRelationshipOrContextDescription != "" || person.Body != "" || len(person.Sources) > 0 || len(person.Emails) > 0 || len(person.Phones) > 0 || len(person.Addresses) > 0 || len(person.Accounts) > 0 || len(person.Tags) > 0 {
 		return false
 	}
 	var count int

@@ -5,6 +5,7 @@ create table if not exists people (
   id text primary key,
   name text not null,
   sort_name text not null default '',
+  card_json text not null default '{}',
   aka_json text not null default '[]',
   tags_json text not null default '[]',
   avatar_json text not null default '{}',
@@ -13,8 +14,8 @@ create table if not exists people (
   apple_json text not null default '{}',
   google_json text not null default '{}',
   body text not null default '',
-  annotation text not null default '',
-  annotation_stated_at text not null default '',
+  person_relationship_or_context_description text not null default '',
+  person_relationship_or_context_description_stated_date text not null default '',
   created_at text not null,
   updated_at text not null
 );

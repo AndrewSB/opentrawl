@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package trawl.calendar;
+
+import "trawl/identity/identity.proto";
+import "trawl/presentation/presentation.proto";
+
+option go_package = "github.com/opentrawl/opentrawl/trawlkit/proto/trawl/calendar;calendar";
+
+message CalendarOwnerOrPurposeAnnotation {
+  string calendar_owner_or_purpose_description = 1;
+  trawl.presentation.CalendarDate calendar_owner_or_purpose_description_stated_date = 2;
+}
+
+message CalendarRecord {
+  trawl.identity.CanonicalArchiveRecordReference canonical_record_reference = 1;
+  string calendar_display_name = 2;
+  string calendar_account_display_name = 3;
+  CalendarOwnerOrPurposeAnnotation calendar_owner_or_purpose_annotation = 4;
+  uint64 active_or_future_calendar_event_count = 5;
+}
+
+message CalendarListResponse {
+  repeated CalendarRecord calendar_records_in_display_order = 1;
+}

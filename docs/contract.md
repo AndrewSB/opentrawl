@@ -62,6 +62,10 @@ ordering consistent.
 | conversations | `ConversationListResponse` | `ConversationRecord` |
 | people | `PersonListResponse` or `PersonRecord` | `PersonRecord` |
 | calendar events | `CalendarEventListResponse` | `CalendarEventRecord` |
+| calendars | `CalendarListResponse` | `CalendarRecord` |
+| notes | `NoteListResponse` | `NoteRecord` |
+| note folders | `NoteFolderListResponse` | `NoteFolderRecord` |
+| recovered note versions | `RecoveredNoteVersionListResponse` | `RecoveredNoteVersionRecord` |
 
 These records carry typed human facts. A message has its time, people and their
 roles, text or media description, and conversation context. A conversation has
@@ -75,35 +79,45 @@ trawler-specific presentation:
 - `OpenedMessageRecordWithConversationContext`;
 - `ConversationRecord`;
 - `PersonRecord`;
-- `CalendarEventRecord`; or
+- `CalendarEventRecord`;
+- `OpenedNoteRecord`; or
 - `TrawlerSpecificOpenedRecordPresentation`.
 
 An opened message includes typed surrounding messages and the conversation
 link. This lets a person move from one result to the complete conversation
 without adding another trawler argument.
 
-## Trawler-owned records and bounded shared presentation
+An opened note carries its note and version identities, metadata and an
+explicitly available or unavailable body. An available body is complete.
 
-Each trawler owns protobuf records for its complete provider-specific meaning.
-For example, Notes owns `OpenedNoteRecord`. Those records stay inside the
-trawler because the CLI and Mac app cannot statically understand a future
-plugin's record type.
+## Typed product projections and bounded plugin presentation
 
-When Trawl owns behaviour across trawlers, it defines a shared protobuf record.
-Messages, conversations, people and calendar events use these records. An
-uncommon provider-specific command or opened record crosses the shared client
-boundary only through `TrawlerSpecificCommandResponse` or
-`TrawlerSpecificOpenedRecordPresentation`. These messages carry the small typed
-list or detail content that every client understands. The trawler owns the
-content and each client owns its layout. These messages do not carry the
-provider record, serialised bytes or a runtime type name.
+Each trawler owns its provider-native archive, source semantics and private
+schemas. Recognised built-in product concepts must cross the client boundary as
+concrete TrawlKit protobuf records. Notes now projects note lists, folders,
+recovered versions and opened notes into shared note records. Calendar now
+projects its calendar catalogue and events into shared calendar records. The
+CLI and Mac app can understand these concepts directly without depending on
+either provider archive.
+
+Gmail, Photos and X still use the generic presentation path. Moving each to a
+concrete typed projection is explicit current debt owned by its existing
+migration lane, not the intended end state.
+
+In the intended end state, the generic `TrawlerSpecificCommandResponse` and
+`TrawlerSpecificOpenedRecordPresentation` fallback is reserved for a genuinely
+unknown plugin record type that has no recognised TrawlKit record. This
+boundary is not fully enforced while the built-in migrations above remain.
+Generic messages carry the small typed list or detail content that every client
+understands. The provider owns the content and each client owns its layout.
+They do not carry the provider record, serialised bytes or a runtime type name.
 
 The CLI currently invokes trawler-specific commands and renders their list or
 detail response. The Mac app currently invokes only `status`, `update`,
 `search` and `open`. It can render a trawler-specific detail returned by
 `open`, but it does not currently invoke trawler-specific commands.
 
-The shared presentation contract is closed. Its values are limited to:
+The generic plugin presentation contract is closed. Its values are limited to:
 
 - text;
 - an unsigned count;
@@ -113,9 +127,9 @@ The shared presentation contract is closed. Its values are limited to:
 A list has named columns and rows. A detail has a name, named fields and an
 optional text body. That is the entire shared presentation contract for
 uncommon command output. It presents bounded lists and details; it is not an
-arbitrary document language. Trawler-specific meaning stays in the
-trawler-owned protobuf. The contract contains no `Any`, JSON, generic map, type
-URL, byte payload, compatibility alias or second transport path.
+arbitrary document language. Provider-native meaning stays with the provider.
+The contract contains no `Any`, JSON, generic map, type URL, byte payload,
+compatibility alias or second transport path.
 
 ## Status
 
@@ -129,6 +143,9 @@ The CLI presents these as `trawler`, `archived`, `last update` and `works`.
 Failures are separate typed operation failures, not extra status text.
 
 ## Search and people
+
+Search remains query-led. It returns evidence matching the query and its
+filters rather than a catalogue of every record.
 
 Each `TrawlerSearchMatch` carries:
 
@@ -168,6 +185,20 @@ tables show links, not provider database identifiers, and never truncate them.
 `open` returns the requested typed record and any bounded context around the
 matching item. The response also keeps the requested link and optional anchor
 identifier so each client can show the same target in its own layout.
+
+`./trawl calendar calendars` returns a typed catalogue with each calendar's
+exact globally routable link. `./trawl calendar events LINK` accepts one of
+these links and lists events from that calendar; it does not identify a
+calendar by its display name or account name. Calendar links are navigation
+links for this command rather than records accepted by root `open`.
+
+Calendar records carry the account and an optional
+`CalendarOwnerOrPurposeAnnotation`. This is a user's stated owner or purpose,
+not Calendar source data. Its typed provenance includes the
+`calendar_owner_or_purpose_description_stated_date`, preserved from the source
+`YYYY-MM-DD` value. When present, the annotation also accompanies the
+calendar's events in event lists and opened event details, so similarly named
+calendars retain their intended context.
 
 ## Output and failure rules
 

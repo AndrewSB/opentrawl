@@ -2,6 +2,7 @@ package calendar
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"strings"
@@ -24,30 +25,33 @@ func (c *Crawler) bindEventsFlags(flagSet *flag.FlagSet) {
 }
 
 func (c *Crawler) runEvents(ctx context.Context, req *trawlkit.TrawlerCommandExecutionRequest) (*command.TrawlerCommandResponse, error) {
-	if len(req.TrawlerCommandPositionalArguments) > 2 {
-		return nil, output.UsageError{Err: fmt.Errorf("events takes at most one calendar and one account")}
+	if len(req.TrawlerCommandPositionalArguments) > 1 {
+		return nil, output.UsageError{Err: output.HumanFacingErrorMessage("Events takes at most one calendar link.")}
 	}
 	if c.eventsLimit < 1 {
 		return nil, output.UsageError{Err: output.HumanFacingErrorMessage("--limit must be at least 1.")}
 	}
-	calendarDisplayNameFilter := ""
-	calendarAccountDisplayNameFilter := ""
-	if len(req.TrawlerCommandPositionalArguments) > 0 {
-		calendarDisplayNameFilter = req.TrawlerCommandPositionalArguments[0]
-	}
-	if len(req.TrawlerCommandPositionalArguments) > 1 {
-		calendarAccountDisplayNameFilter = req.TrawlerCommandPositionalArguments[1]
+	calendarIdentifierFilter := archive.CalendarIdentifier("")
+	if len(req.TrawlerCommandPositionalArguments) == 1 {
+		var err error
+		calendarIdentifierFilter, err = calendarIdentifierFromGloballyRoutableTrawlLink(
+			ctx,
+			req,
+			req.TrawlerCommandPositionalArguments[0],
+		)
+		if err != nil {
+			return nil, err
+		}
 	}
 	store, err := archive.UseExisting(ctx, req.OpenedTrawlerArchiveStore, req.TrawlerArchivePaths.TrawlerArchivePath)
 	if err != nil {
 		return nil, archiveErr(fmt.Errorf("open archive: %w", err))
 	}
-	archiveEvents, err := store.ListUpcomingEvents(
+	archiveEvents, err := store.ListActiveOrFutureEvents(
 		ctx,
 		time.Now(),
 		c.eventsLimit+1,
-		calendarDisplayNameFilter,
-		calendarAccountDisplayNameFilter,
+		calendarIdentifierFilter,
 	)
 	if err != nil {
 		return nil, err
@@ -76,6 +80,46 @@ func (c *Crawler) runEvents(ctx context.Context, req *trawlkit.TrawlerCommandExe
 			},
 		},
 	}, nil
+}
+
+func calendarIdentifierFromGloballyRoutableTrawlLink(
+	ctx context.Context,
+	req *trawlkit.TrawlerCommandExecutionRequest,
+	globallyRoutableCalendarTrawlLink string,
+) (archive.CalendarIdentifier, error) {
+	localCalendarShortReference, argumentWasGloballyRoutableTrawlLink, err :=
+		trawlkit.ReplaceGloballyRoutableTrawlLinkWithLocalShortReferenceForSelectedTrawlerOrKeepFreeFormArgument(
+			globallyRoutableCalendarTrawlLink,
+			archive.AppID,
+		)
+	if err != nil {
+		return archive.CalendarIdentifier(""), err
+	}
+	if !argumentWasGloballyRoutableTrawlLink {
+		return archive.CalendarIdentifier(""), output.UsageError{
+			Err: output.HumanFacingErrorMessage("A calendar link is required."),
+		}
+	}
+	canonicalCalendarRecordReferences, err := req.ResolveShortReference(
+		ctx,
+		trawlkit.NewLocalTrawlerShortReference(localCalendarShortReference),
+	)
+	if errors.Is(err, trawlkit.ErrUnknownShortRef) {
+		return archive.CalendarIdentifier(""), commandErr(1, "not_found", output.HumanFacingErrorMessage("No calendar has that link."))
+	}
+	if errors.Is(err, trawlkit.ErrAmbiguousShortRef) {
+		return archive.CalendarIdentifier(""), commandErr(1, "ambiguous", output.HumanFacingErrorMessage("More than one calendar has that link."))
+	}
+	if err != nil {
+		return archive.CalendarIdentifier(""), err
+	}
+	calendarIdentifier, calendarRecordReferenceIsValid := archive.CalendarIdentifierFromCanonicalRecordReference(
+		trawlkit.CanonicalArchiveRecordReferenceText(canonicalCalendarRecordReferences[0]),
+	)
+	if !calendarRecordReferenceIsValid {
+		return archive.CalendarIdentifier(""), commandErr(1, "not_found", output.HumanFacingErrorMessage("This is not a calendar link."))
+	}
+	return calendarIdentifier, nil
 }
 
 func calendarEventStartTimeForDisplay(

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	sqlite3 "github.com/mattn/go-sqlite3"
+	"github.com/opentrawl/opentrawl/trawlers/contacts/internal/model"
 	"github.com/opentrawl/opentrawl/trawlkit/cache"
 	ckstore "github.com/opentrawl/opentrawl/trawlkit/store"
 )
@@ -225,15 +226,16 @@ func readAddressBookDatabase(ctx context.Context, path string) ([]Contact, error
 			continue
 		}
 		for _, email := range record.emails {
-			record.contact.Emails = append(record.contact.Emails, email.value)
+			record.contact.Emails = append(record.contact.Emails, LabeledValue{Value: email.value, Label: email.label})
 		}
 		for _, phone := range record.phones {
-			record.contact.Phones = append(record.contact.Phones, phone.value)
+			record.contact.Phones = append(record.contact.Phones, LabeledValue{Value: phone.value, Label: phone.label})
 		}
 		record.contact.Addresses = append(record.contact.Addresses, record.postal...)
-		if len(record.contact.Emails) == 0 && len(record.contact.Phones) == 0 && len(record.contact.Addresses) == 0 {
-			continue
-		}
+		// A card with a name and no phone, email or address is still a person.
+		// Dropping it discarded exactly the contacts filed under a
+		// circumstance — a nickname and nothing else — which are the ones the
+		// card names exist to make findable.
 		contacts = append(contacts, record.contact)
 	}
 	return contacts, nil
@@ -388,11 +390,30 @@ func readAddressBookRecords(ctx context.Context, db *sql.DB, schema addressBookS
 	if schema.recordColumns["ZTHUMBNAILIMAGEDATA"] {
 		avatarExpr = "ZTHUMBNAILIMAGEDATA"
 	}
+	// Every card column is optional. Address book layouts differ across macOS
+	// versions and across accounts on one Mac, so a database that lacks one
+	// contributes an empty value rather than failing the whole read.
+	cardColumns := []string{
+		"ZMAIDENNAME",
+		"ZTITLE",
+		"ZSUFFIX",
+		"ZNICKNAME",
+		"ZPHONETICFIRSTNAME",
+		"ZPHONETICMIDDLENAME",
+		"ZPHONETICLASTNAME",
+		"ZPHONETICORGANIZATION",
+		"ZDEPARTMENT",
+		"ZJOBTITLE",
+	}
+	cardExprs := make([]string, 0, len(cardColumns))
+	for _, column := range cardColumns {
+		cardExprs = append(cardExprs, optionalTextExpression(schema.recordColumns, column))
+	}
 	query := fmt.Sprintf(`
-select Z_PK, %s, coalesce(ZFIRSTNAME, ''), %s, coalesce(ZLASTNAME, ''), coalesce(ZORGANIZATION, ''), %s
+select Z_PK, %s, coalesce(ZFIRSTNAME, ''), %s, coalesce(ZLASTNAME, ''), coalesce(ZORGANIZATION, ''), %s, %s
 from ZABCDRECORD
 where Z_ENT = ?
-order by Z_PK`, idExpr, middleExpr, avatarExpr)
+order by Z_PK`, idExpr, middleExpr, avatarExpr, strings.Join(cardExprs, ", "))
 	rows, err := db.QueryContext(ctx, query, schema.contactEntity)
 	if err != nil {
 		return nil, nil, err
@@ -404,18 +425,36 @@ order by Z_PK`, idExpr, middleExpr, avatarExpr)
 		var pk int64
 		var identifier, firstName, middleName, lastName, organisation string
 		var avatar []byte
-		if err := rows.Scan(&pk, &identifier, &firstName, &middleName, &lastName, &organisation, &avatar); err != nil {
+		var card model.Card
+		if err := rows.Scan(
+			&pk, &identifier, &firstName, &middleName, &lastName, &organisation, &avatar,
+			&card.PreviousFamilyName,
+			&card.NamePrefix,
+			&card.NameSuffix,
+			&card.Nickname,
+			&card.PhoneticGivenName,
+			&card.PhoneticMiddleName,
+			&card.PhoneticFamilyName,
+			&card.PhoneticOrganizationName,
+			&card.DepartmentName,
+			&card.JobTitle,
+		); err != nil {
 			return nil, nil, err
 		}
 		identifier = strings.TrimSpace(identifier)
 		if identifier == "" {
 			continue
 		}
+		card.GivenName = firstName
+		card.MiddleName = middleName
+		card.FamilyName = lastName
+		card.OrganizationName = organisation
 		contact := Contact{
 			Identifier: identifier,
 			FirstName:  strings.TrimSpace(firstName),
 			LastName:   strings.TrimSpace(lastName),
 			FullName:   fullName(firstName, middleName, lastName, organisation),
+			Card:       card.Clean(),
 			AvatarData: append([]byte(nil), avatar...),
 		}
 		records[pk] = &addressBookRecord{contact: contact}
@@ -651,8 +690,8 @@ func mergeContact(base, incoming Contact) Contact {
 	if strings.TrimSpace(base.FullName) == "" {
 		base.FullName = incoming.FullName
 	}
-	base.Emails = appendUniqueStrings(base.Emails, incoming.Emails...)
-	base.Phones = appendUniqueStrings(base.Phones, incoming.Phones...)
+	base.Emails = appendUniqueLabeledValues(base.Emails, incoming.Emails...)
+	base.Phones = appendUniqueLabeledValues(base.Phones, incoming.Phones...)
 	for _, address := range incoming.Addresses {
 		base.Addresses = appendUniquePostalAddress(base.Addresses, address)
 	}
@@ -705,4 +744,23 @@ func appendUniquePostalAddress(values []PostalAddress, incoming PostalAddress) [
 		}
 	}
 	return append(values, incoming)
+}
+
+// appendUniqueLabeledValues keeps the first label seen for a value. Two address
+// book databases can hold the same number under different labels, and the first
+// source in the sorted order wins for every other field too.
+func appendUniqueLabeledValues(base []LabeledValue, incoming ...LabeledValue) []LabeledValue {
+	seen := make(map[string]bool, len(base))
+	for _, value := range base {
+		seen[strings.TrimSpace(value.Value)] = true
+	}
+	for _, value := range incoming {
+		trimmed := strings.TrimSpace(value.Value)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		base = append(base, value)
+	}
+	return base
 }
