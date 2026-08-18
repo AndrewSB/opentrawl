@@ -62,6 +62,14 @@ func WriteTrawlerCommandResponse(
 		)
 	case *command.TrawlerCommandResponse_CalendarEventListResponse:
 		err = WriteCalendarEventListResponse(writer, typedResponse.CalendarEventListResponse, globallyRoutableTrawlLinksByCanonicalRecordReference)
+	case *command.TrawlerCommandResponse_CalendarListResponse:
+		err = WriteCalendarListResponse(writer, typedResponse.CalendarListResponse, globallyRoutableTrawlLinksByCanonicalRecordReference)
+	case *command.TrawlerCommandResponse_NoteListResponse:
+		err = WriteNoteListResponse(writer, typedResponse.NoteListResponse, globallyRoutableTrawlLinksByCanonicalRecordReference)
+	case *command.TrawlerCommandResponse_NoteFolderListResponse:
+		err = WriteNoteFolderListResponse(writer, typedResponse.NoteFolderListResponse)
+	case *command.TrawlerCommandResponse_RecoveredNoteVersionListResponse:
+		err = WriteRecoveredNoteVersionListResponse(writer, typedResponse.RecoveredNoteVersionListResponse, globallyRoutableTrawlLinksByCanonicalRecordReference)
 	case *command.TrawlerCommandResponse_TrawlerSpecificCommandResponse:
 		err = writeTrawlerSpecificCommandResponse(
 			writer,
@@ -75,11 +83,7 @@ func WriteTrawlerCommandResponse(
 	if err != nil {
 		return err
 	}
-	hints := make([]string, 0, 2)
-	if trawlerCommandResponseIsList(response) &&
-		globallyRoutableTrawlLinkExists(globallyRoutableTrawlLinksByCanonicalRecordReference) {
-		hints = append(hints, "Open: "+trawlCommandLineForDisplay(writer, []string{"open", "LINK"}))
-	}
+	hints := make([]string, 0, 1)
 	if trawlerCommandResponseHasMore(response) {
 		if len(context.MoreTrawlerCommandArgumentsAfterTrawlInvocation) > 0 {
 			hints = append(hints, "More: "+trawlCommandLineForDisplay(
@@ -102,20 +106,6 @@ func WriteTrawlerCommandResponse(
 	return nil
 }
 
-func trawlerCommandResponseIsList(response *command.TrawlerCommandResponse) bool {
-	switch typedResponse := response.GetTypedTrawlerCommandResponse().(type) {
-	case *command.TrawlerCommandResponse_MessageListResponse,
-		*command.TrawlerCommandResponse_ConversationListResponse,
-		*command.TrawlerCommandResponse_PersonListResponse,
-		*command.TrawlerCommandResponse_CalendarEventListResponse:
-		return true
-	case *command.TrawlerCommandResponse_TrawlerSpecificCommandResponse:
-		return typedResponse.TrawlerSpecificCommandResponse.GetTrawlerSpecificCommandListPresentation() != nil
-	default:
-		return false
-	}
-}
-
 func trawlerCommandResponseHasMore(response *command.TrawlerCommandResponse) bool {
 	switch typedResponse := response.GetTypedTrawlerCommandResponse().(type) {
 	case *command.TrawlerCommandResponse_MessageListResponse:
@@ -126,6 +116,10 @@ func trawlerCommandResponseHasMore(response *command.TrawlerCommandResponse) boo
 		return typedResponse.PersonListResponse.GetMoreMatchingPeopleExist()
 	case *command.TrawlerCommandResponse_CalendarEventListResponse:
 		return typedResponse.CalendarEventListResponse.GetMoreMatchingCalendarEventsExist()
+	case *command.TrawlerCommandResponse_NoteListResponse:
+		return typedResponse.NoteListResponse.GetMoreMatchingNotesExist()
+	case *command.TrawlerCommandResponse_RecoveredNoteVersionListResponse:
+		return typedResponse.RecoveredNoteVersionListResponse.GetMoreRecoveredNoteVersionsExist()
 	case *command.TrawlerCommandResponse_TrawlerSpecificCommandResponse:
 		return typedResponse.TrawlerSpecificCommandResponse.GetTrawlerSpecificCommandListPresentation().GetMoreRowsExist()
 	default:
@@ -160,17 +154,6 @@ func writeTrawlerSpecificCommandResponse(
 	default:
 		return fmt.Errorf("trawler-specific command response has no presentation")
 	}
-}
-
-func globallyRoutableTrawlLinkExists(
-	globallyRoutableTrawlLinksByCanonicalRecordReference GloballyRoutableTrawlLinksByCanonicalArchiveRecordReference,
-) bool {
-	for _, globallyRoutableTrawlLink := range globallyRoutableTrawlLinksByCanonicalRecordReference {
-		if globallyRoutableTrawlLinkText(globallyRoutableTrawlLink.GloballyRoutableTrawlLink) != "" {
-			return true
-		}
-	}
-	return false
 }
 
 func trawlCommandLineForDisplay(writer io.Writer, argumentsAfterTrawlInvocation []string) string {

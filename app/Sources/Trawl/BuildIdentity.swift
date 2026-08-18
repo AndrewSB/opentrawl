@@ -7,6 +7,7 @@ struct BuildIdentity: Equatable, Sendable {
   let version: String
   let gitCommit: String
   let hasLocalChanges: Bool
+  let isDevelopmentBuild: Bool
 
   static let current = BuildIdentity(bundle: .main)
 
@@ -14,27 +15,25 @@ struct BuildIdentity: Equatable, Sendable {
     self.init(
       version: bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
       gitCommit: bundle.object(forInfoDictionaryKey: "GitCommit") as? String,
-      hasLocalChanges: bundle.object(forInfoDictionaryKey: "GitDirty") as? Bool ?? false
+      hasLocalChanges: bundle.object(forInfoDictionaryKey: "GitDirty") as? Bool ?? false,
+      isDevelopmentBuild: bundle.bundleIdentifier == "org.opentrawl.trawl.dev"
     )
   }
 
   init(
     version: String?,
     gitCommit: String?,
-    hasLocalChanges: Bool = false
+    hasLocalChanges: Bool = false,
+    isDevelopmentBuild: Bool = false
   ) {
     self.version = Self.present(version, fallback: "development")
     self.gitCommit = Self.present(gitCommit, fallback: "unknown")
     self.hasLocalChanges = hasLocalChanges
-  }
-
-  var shortCommit: String {
-    String(gitCommit.prefix(7))
+    self.isDevelopmentBuild = isDevelopmentBuild
   }
 
   var displayName: String {
-    let suffix = hasLocalChanges ? "+changes" : ""
-    return "OpenTrawl \(version) · \(shortCommit)\(suffix)"
+    isDevelopmentBuild ? "Development build" : "Version \(version)"
   }
 
   var sourceURL: URL? {
@@ -56,7 +55,7 @@ struct BuildIdentityFooter: View {
     HStack(spacing: 8) {
       Spacer()
       if isExperimental {
-        Text(OperationalCopy.BuildIdentity.experimentalFeaturesOn)
+        Text(HumanCopy.BuildIdentity.experimentalFeaturesOn)
           .font(.caption.weight(.semibold))
           .foregroundStyle(TrawlDesign.brandRed)
       }
@@ -64,7 +63,6 @@ struct BuildIdentityFooter: View {
         .font(.caption.monospaced())
         .foregroundStyle(.secondary)
         .textSelection(.enabled)
-        .help(OperationalCopy.BuildIdentity.help)
     }
     .padding(.horizontal, 16)
     .frame(height: TrawlDesign.returningFooterHeight)

@@ -55,7 +55,7 @@ func trawlerCommandResponseRowCounts(
 	}
 	switch typedResponse := response.GetTypedTrawlerCommandResponse().(type) {
 	case *command.TrawlerCommandResponse_MessageListResponse:
-		return uint64(len(typedResponse.MessageListResponse.GetMessageRecordsInDisplayOrder())),
+		return uint64(len(typedResponse.MessageListResponse.GetMessageRecordsNewestFirst())),
 			typedResponse.MessageListResponse.GetTotalMatchingMessageCount(),
 			typedResponse.MessageListResponse.GetTotalMatchingMessageCountIsLowerBound(),
 			typedResponse.MessageListResponse.GetMoreMatchingMessagesExist()
@@ -75,6 +75,22 @@ func trawlerCommandResponseRowCounts(
 			typedResponse.CalendarEventListResponse.GetTotalMatchingCalendarEventCount(),
 			typedResponse.CalendarEventListResponse.GetTotalMatchingCalendarEventCountIsLowerBound(),
 			typedResponse.CalendarEventListResponse.GetMoreMatchingCalendarEventsExist()
+	case *command.TrawlerCommandResponse_CalendarListResponse:
+		calendarCount := uint64(len(typedResponse.CalendarListResponse.GetCalendarRecordsInDisplayOrder()))
+		return calendarCount, calendarCount, false, false
+	case *command.TrawlerCommandResponse_NoteListResponse:
+		return uint64(len(typedResponse.NoteListResponse.GetNoteRecordsNewestFirst())),
+			typedResponse.NoteListResponse.GetTotalMatchingNoteCount(),
+			false,
+			typedResponse.NoteListResponse.GetMoreMatchingNotesExist()
+	case *command.TrawlerCommandResponse_NoteFolderListResponse:
+		folderCount := uint64(len(typedResponse.NoteFolderListResponse.GetNoteFolderRecordsInDisplayOrder()))
+		return folderCount, folderCount, false, false
+	case *command.TrawlerCommandResponse_RecoveredNoteVersionListResponse:
+		return uint64(len(typedResponse.RecoveredNoteVersionListResponse.GetRecoveredNoteVersionRecordsNewestFirst())),
+			typedResponse.RecoveredNoteVersionListResponse.GetTotalRecoveredNoteVersionCount(),
+			false,
+			typedResponse.RecoveredNoteVersionListResponse.GetMoreRecoveredNoteVersionsExist()
 	case *command.TrawlerCommandResponse_TrawlerSpecificCommandResponse:
 		listPresentation := typedResponse.TrawlerSpecificCommandResponse.GetTrawlerSpecificCommandListPresentation()
 		if listPresentation == nil {

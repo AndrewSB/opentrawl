@@ -13,7 +13,6 @@ const (
 	tableCellNonBreakingSpaceMarker = "\ue000"
 	minPlainColumnWidth             = 3
 	minimumStandardTableOutputWidth = 80
-	maximumReadableTableOutputWidth = 240
 )
 
 type TableColumn struct {
@@ -63,13 +62,43 @@ func (writer tableHumanOutputWriter) UnwrapWriter() io.Writer {
 }
 
 func WriteTable(w io.Writer, columns []TableColumn, rows [][]string) error {
+	return writeTable(w, columns, rows, -1)
+}
+
+func writeHumanRecordRowsWithPrimaryContentColumn(
+	w io.Writer,
+	columns []TableColumn,
+	rows [][]string,
+	primaryHumanContentColumnIndex int,
+) error {
+	if primaryHumanContentColumnIndex < 0 || primaryHumanContentColumnIndex >= len(columns) {
+		return fmt.Errorf(
+			"primary human content column index %d is outside %d table columns",
+			primaryHumanContentColumnIndex,
+			len(columns),
+		)
+	}
+	return writeTable(w, columns, rows, primaryHumanContentColumnIndex)
+}
+
+func writeTable(
+	w io.Writer,
+	columns []TableColumn,
+	rows [][]string,
+	primaryHumanContentColumnIndex int,
+) error {
 	if len(columns) == 0 || len(rows) == 0 {
 		return nil
 	}
 	w = tableHumanOutputWriter{writer: w}
 	outputWidth := readableTableOutputWidth(w)
-	renderColumns := tableRenderColumns(columns, rows, outputWidth)
-	if tableNeedsFieldValueRows(renderColumns, outputWidth) {
+	renderColumns := tableRenderColumnsWithPrimaryHumanContentColumn(
+		columns,
+		rows,
+		outputWidth,
+		primaryHumanContentColumnIndex,
+	)
+	if primaryHumanContentColumnIndex < 0 && tableNeedsFieldValueRows(renderColumns, outputWidth) {
 		return writeFieldValueRows(w, renderColumns, rows, outputWidth)
 	}
 	if err := writeRenderHeader(w, renderColumns); err != nil {
@@ -84,7 +113,7 @@ func WriteTable(w io.Writer, columns []TableColumn, rows [][]string) error {
 }
 
 func readableTableOutputWidth(writer io.Writer) int {
-	return min(OutputWidth(writer), maximumReadableTableOutputWidth)
+	return OutputWidth(writer)
 }
 
 func tableNeedsFieldValueRows(columns []renderColumn, outputWidth int) bool {
@@ -138,6 +167,15 @@ func writeFieldValueRows(w io.Writer, columns []renderColumn, rows [][]string, o
 }
 
 func tableRenderColumns(columns []TableColumn, rows [][]string, outputWidth int) []renderColumn {
+	return tableRenderColumnsWithPrimaryHumanContentColumn(columns, rows, outputWidth, -1)
+}
+
+func tableRenderColumnsWithPrimaryHumanContentColumn(
+	columns []TableColumn,
+	rows [][]string,
+	outputWidth int,
+	primaryHumanContentColumnIndex int,
+) []renderColumn {
 	out := make([]renderColumn, len(columns))
 	for i, column := range columns {
 		header := strings.ToLower(strings.TrimSpace(column.Header))
@@ -155,6 +193,9 @@ func tableRenderColumns(columns []TableColumn, rows [][]string, outputWidth int)
 			width = 1
 		}
 		minimumWidth := column.MinimumWidth
+		if primaryHumanContentColumnIndex >= 0 {
+			minimumWidth = max(minimumWidth, DisplayWidth(header))
+		}
 		if (column.KeepWholeTokensWhenTerminalWidthAllows || column.NeverTruncateCellValues) &&
 			naturalWidth > minimumWidth {
 			minimumWidth = naturalWidth
@@ -171,7 +212,7 @@ func tableRenderColumns(columns []TableColumn, rows [][]string, outputWidth int)
 			Clamp:                                  column.MaximumWrappedLines,
 		}
 	}
-	fitRenderColumns(out, outputWidth)
+	fitRenderColumnsWithPrimaryHumanContentColumn(out, outputWidth, primaryHumanContentColumnIndex)
 	return out
 }
 
@@ -199,10 +240,23 @@ func naturalTableCellLines(value string, wrap bool) []string {
 	return []string{value}
 }
 
-func fitRenderColumns(columns []renderColumn, outputWidth int) {
+func fitRenderColumnsWithPrimaryHumanContentColumn(
+	columns []renderColumn,
+	outputWidth int,
+	primaryHumanContentColumnIndex int,
+) {
 	hideColumnsBeforeTruncatingOtherColumnsBelowMinimumWidth(columns, outputWidth)
 	for len(columns) > 0 && renderColumnsWidth(columns) > outputWidth {
-		column := widestShrinkableRenderColumn(columns)
+		column := widestShrinkableRenderColumnExcept(columns, primaryHumanContentColumnIndex)
+		if column < 0 {
+			column = widestShrinkableRenderColumn(columns)
+		}
+		if column < 0 {
+			column = widestTruncatableRenderColumnWiderThanOneCellExcept(
+				columns,
+				primaryHumanContentColumnIndex,
+			)
+		}
 		if column < 0 {
 			column = widestTruncatableRenderColumnWiderThanOneCell(columns)
 		}
@@ -264,8 +318,15 @@ func renderColumnsMinimumWidth(columns []renderColumn) int {
 }
 
 func widestShrinkableRenderColumn(columns []renderColumn) int {
+	return widestShrinkableRenderColumnExcept(columns, -1)
+}
+
+func widestShrinkableRenderColumnExcept(columns []renderColumn, excludedColumnIndex int) int {
 	column := -1
 	for i := range columns {
+		if i == excludedColumnIndex {
+			continue
+		}
 		if columns[i].HiddenFromRenderedTable {
 			continue
 		}
@@ -280,8 +341,18 @@ func widestShrinkableRenderColumn(columns []renderColumn) int {
 }
 
 func widestTruncatableRenderColumnWiderThanOneCell(columns []renderColumn) int {
+	return widestTruncatableRenderColumnWiderThanOneCellExcept(columns, -1)
+}
+
+func widestTruncatableRenderColumnWiderThanOneCellExcept(
+	columns []renderColumn,
+	excludedColumnIndex int,
+) int {
 	column := -1
 	for i := range columns {
+		if i == excludedColumnIndex {
+			continue
+		}
 		if columns[i].HiddenFromRenderedTable {
 			continue
 		}
@@ -367,7 +438,7 @@ func renderCellLines(value string, column renderColumn, header bool) []string {
 	if header {
 		return []string{Truncate(compactTableCell(value), column.Width)}
 	}
-	value = HumanCell(column.Header, value)
+	value = strings.TrimSpace(value)
 	if strings.TrimSpace(value) == "" {
 		return []string{""}
 	}
@@ -377,12 +448,25 @@ func renderCellLines(value string, column renderColumn, header bool) []string {
 	if column.Wrap {
 		value = strings.TrimRight(normalizeTableCell(value), "\n")
 		value = elideWideTokens(value, column.Width)
-		lines := Wrap(value, column.Width)
+		lines := nonEmptyWrappedTableCellLines(Wrap(value, column.Width))
 		return clampLines(lines, column.Clamp, column.Width)
 	}
 	value = compactTableCell(value)
 	value = Truncate(value, column.Width)
 	return []string{value}
+}
+
+func nonEmptyWrappedTableCellLines(lines []string) []string {
+	nonEmptyLines := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			nonEmptyLines = append(nonEmptyLines, line)
+		}
+	}
+	if len(nonEmptyLines) == 0 {
+		return []string{""}
+	}
+	return nonEmptyLines
 }
 
 // elideWideTokens clips any whitespace-delimited token wider than the column
@@ -421,6 +505,10 @@ func clampLines(lines []string, limit int, width int) []string {
 	}
 	out := append([]string(nil), lines[:limit]...)
 	out[len(out)-1] = withTrailingEllipsis(out[len(out)-1], width)
+	if len(out) > 1 && strings.TrimSpace(out[len(out)-1]) == "…" {
+		out[len(out)-2] = withTrailingEllipsis(out[len(out)-2], width)
+		return out[:len(out)-1]
+	}
 	return out
 }
 

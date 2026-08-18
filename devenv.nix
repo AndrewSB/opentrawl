@@ -11,9 +11,11 @@
   };
 
   packages = [
+    pkgs.awscli2       # scripts/deploy-website
     pkgs.buf
     pkgs.golangci-lint
     pkgs.protoc-gen-go
+    pkgs.openssl
     pkgs.sqlite
     pkgs.jq
   ];
@@ -22,6 +24,5 @@
     export PATH="$DEVENV_ROOT/.dev/bin:$PATH"
     # trawlkit/store uses C SQLite (mattn/go-sqlite3); FTS5 is a build tag.
     export GOFLAGS="-tags=sqlite_fts5"
-    "$DEVENV_ROOT/scripts/dev-bin" || echo "dev-bin: build failed, keeping existing .dev/bin binaries (see errors above)"
   '';
 }

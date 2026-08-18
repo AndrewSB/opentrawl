@@ -15,6 +15,9 @@ Which asset where:
 - app icon (pre-Tahoe): `exports/icns/OpenTrawl.icns`
 - menu bar: `exports/menubar/template-*.png` (or `src/glyph-menubar.svg`)
 - website: `exports/web/` — favicons, touch icon, `mark.svg`, lockups
+- link previews: `exports/social/card.png` — 1200x630, built by
+  `build/build_card.py`, which takes its words from `website/copy.txt` and
+  writes a copy to `website/card.png`. Rebuild it after editing the hero copy.
 - social: `exports/social/` — X banner 1500x500, avatar (400 for upload);
   `avatar-glass.jpg` (1024, white background) is the system-rendered Liquid
   Glass tile for GitHub and anywhere else that wants the "real app icon" look
@@ -95,3 +98,11 @@ Ship in an app bundle: `Assets.car` into `Contents/Resources`, set
 Menu bar: load a template PNG pair (or the glyph SVG) with
 `NSImage.isTemplate = true`; artwork is black + alpha only and the system
 tints it per appearance.
+
+## Other companies' app icons
+
+`app-icons/` holds the icons of the apps OpenTrawl searches, used to show what
+it works with. They belong to Apple, Meta, Telegram and Google. Seven come from
+the app bundles on a Mac; Gmail and X come from the App Store artwork the Mac
+app already fetches at runtime. They are not OpenTrawl brand assets and none of
+the rules above apply to them.

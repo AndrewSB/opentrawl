@@ -21,15 +21,23 @@ func (s *Store) ApplySnapshot(ctx context.Context, calendars []Calendar, events 
 		UpdatedAt:        updatedAt.UTC().Format(time.RFC3339Nano),
 	}
 	err := s.store.WithTx(ctx, func(tx *sql.Tx) error {
-		shortReferenceAssignmentCandidatesForEventsPublishedByCalendarTransaction := make(
+		shortReferenceAssignmentCandidatesForRecordsPublishedByCalendarTransaction := make(
 			[]trawlkit.ShortReferenceAssignmentCandidate,
 			0,
-			len(events),
+			len(calendars)+len(events),
 		)
 		for _, calendar := range calendars {
 			if err := upsertCalendar(ctx, tx, calendar, runID); err != nil {
 				return err
 			}
+			shortReferenceAssignmentCandidatesForRecordsPublishedByCalendarTransaction = append(
+				shortReferenceAssignmentCandidatesForRecordsPublishedByCalendarTransaction,
+				trawlkit.ShortReferenceAssignmentCandidate{
+					StableRecordReferenceUsedForShortReferenceAssignment: trawlkit.NewCanonicalArchiveRecordReference(
+						CalendarCanonicalRecordReferenceForIdentifier(calendar.ID),
+					),
+				},
+			)
 		}
 		for _, event := range events {
 			result, err := upsertEvent(ctx, tx, event, runID)
@@ -44,8 +52,8 @@ func (s *Store) ApplySnapshot(ctx context.Context, calendars []Calendar, events 
 			default:
 				stats.UnchangedEvents++
 			}
-			shortReferenceAssignmentCandidatesForEventsPublishedByCalendarTransaction = append(
-				shortReferenceAssignmentCandidatesForEventsPublishedByCalendarTransaction,
+			shortReferenceAssignmentCandidatesForRecordsPublishedByCalendarTransaction = append(
+				shortReferenceAssignmentCandidatesForRecordsPublishedByCalendarTransaction,
 				trawlkit.ShortReferenceAssignmentCandidate{
 					StableRecordReferenceUsedForShortReferenceAssignment: trawlkit.NewCanonicalArchiveRecordReference(
 						RefForUID(event.UID),
@@ -74,7 +82,7 @@ func (s *Store) ApplySnapshot(ctx context.Context, calendars []Calendar, events 
 		err = trawlkit.ReplaceShortReferencesForCompleteArchiveRecordSnapshotUsingCallerOwnedSQLTransaction(
 			ctx,
 			tx,
-			shortReferenceAssignmentCandidatesForEventsPublishedByCalendarTransaction,
+			shortReferenceAssignmentCandidatesForRecordsPublishedByCalendarTransaction,
 		)
 		return err
 	})
@@ -97,7 +105,7 @@ on conflict(calendar_id) do update set
   account_type = excluded.account_type,
   account_disabled = excluded.account_disabled,
   update_run_id = excluded.update_run_id
-`, calendar.ID, calendar.SourceRowID, calendar.Title, calendar.Type, calendar.ExternalID, calendar.StoreID,
+`, string(calendar.ID), calendar.SourceRowID, calendar.Title, calendar.Type, calendar.ExternalID, calendar.StoreID,
 		calendar.AccountName, calendar.AccountType, boolInt(calendar.AccountDisabled), runID)
 	if err != nil {
 		return fmt.Errorf("upsert calendar: %w", err)
@@ -164,7 +172,7 @@ on conflict(event_uid) do update set
   participants_text = excluded.participants_text,
   fingerprint = excluded.fingerprint,
   update_run_id = excluded.update_run_id
-`, event.UID, event.SourceRowID, event.UUID, event.UniqueIdentifier, event.Calendar.ID, event.Calendar.Title,
+`, event.UID, event.SourceRowID, event.UUID, event.UniqueIdentifier, string(event.Calendar.ID), event.Calendar.Title,
 		event.Calendar.Type, event.Calendar.ExternalID, event.Account.Name, event.Account.Type, event.Start,
 		event.End, event.StartUnix, event.EndUnix, boolInt(event.AllDay), event.Summary, event.Description,
 		event.Status, event.URL, boolInt(event.HasRecurrences), nullableInt64(event.Availability), event.Organizer.DisplayName, event.Organizer.Email,

@@ -11,6 +11,7 @@ public enum OpenedRecordContent: Sendable, Equatable {
   case conversation(ConversationRecord)
   case person(PersonRecord)
   case calendarEvent(CalendarEventRecord)
+  case note(OpenedNoteRecord)
   case trawlerSpecificRecordPresentation(TrawlerSpecificOpenedRecordPresentation)
 
   func containsAnchor(_ wantedAnchor: RecordAnchorIdentifier) -> Bool {
@@ -19,12 +20,35 @@ public enum OpenedRecordContent: Sendable, Equatable {
       openedMessage.openedMessageRecordAnchor == wantedAnchor
     case .person(let personRecord):
       personRecord.containsAnchor(wantedAnchor)
+    case .note(let openedNoteRecord):
+      openedNoteRecord.noteDisplayNameAnchor == wantedAnchor
+        || openedNoteRecord.openedNoteBodyAnchor == wantedAnchor
     case .trawlerSpecificRecordPresentation(let openedRecord):
       openedRecord.detailPresentation.containsAnchor(wantedAnchor)
     case .conversation, .calendarEvent:
       true
     }
   }
+}
+
+public enum OpenedNoteBody: Sendable, Equatable {
+  case available(noteBodyText: String)
+  case unavailable
+}
+
+public struct OpenedNoteRecord: Sendable, Equatable {
+  public let canonicalNoteRecordReference: CanonicalArchiveRecordReference
+  public let canonicalOpenedNoteVersionRecordReference: CanonicalArchiveRecordReference
+  public let noteDisplayName: String
+  public let noteFolderDisplayName: String
+  public let noteCreatedTime: Date?
+  public let noteModifiedTime: Date?
+  public let openedNoteVersionTime: Date?
+  public let recoveredNoteVersionCount: UInt64
+  public let openedNoteBody: OpenedNoteBody
+  public let specificRecoveredNoteVersionWasOpened: Bool
+  public let noteDisplayNameAnchor: RecordAnchorIdentifier
+  public let openedNoteBodyAnchor: RecordAnchorIdentifier
 }
 
 public enum ArchiveRecordAssociatedTimeForDisplay: Sendable, Equatable {
@@ -36,8 +60,22 @@ public struct MessageRecord: Sendable, Equatable, Identifiable {
   public let messageTime: ArchiveRecordAssociatedTimeForDisplay?
   public let canonicalRecordReference: CanonicalArchiveRecordReference
   public let peopleRelatedToMessage: [PersonRelatedToArchiveRecord]
-  public let displayedMessageOrMediaText: String
-  public let conversationDisplayContext: String
+  public let messageText: String
+  public let conversationDisplayName: String
+  public let messageMedia: MessageMedia?
+
+  public var messageTextAndMediaDescription: String {
+    let trimmedMessageText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let messageMedia else {
+      return trimmedMessageText
+    }
+    let mediaKind =
+      messageMedia.messageMediaContentKind?.messageMediaContentKindDisplayName ?? "Attachment"
+    let mediaTitle = messageMedia.messageMediaTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    let mediaDescription = mediaTitle.isEmpty ? mediaKind : "\(mediaKind): \(mediaTitle)"
+    return trimmedMessageText.isEmpty
+      ? mediaDescription : "\(trimmedMessageText) · \(mediaDescription)"
+  }
 
   public var id: CanonicalArchiveRecordReference {
     canonicalRecordReference
@@ -45,10 +83,31 @@ public struct MessageRecord: Sendable, Equatable, Identifiable {
 }
 
 public enum MessageMediaContentKind: Sendable, Equatable {
+  case attachment
   case image
   case video
   case audio
   case file
+  case gif
+  case sticker
+  case link
+  case photoOrVideo
+  case voiceOrInstantVideo
+
+  public var messageMediaContentKindDisplayName: String {
+    switch self {
+    case .attachment: "Attachment"
+    case .image: "Image"
+    case .video: "Video"
+    case .audio: "Audio"
+    case .file: "File"
+    case .gif: "GIF"
+    case .sticker: "Sticker"
+    case .link: "Link"
+    case .photoOrVideo: "Photo or video"
+    case .voiceOrInstantVideo: "Voice message or instant video"
+    }
+  }
 }
 
 public struct MessageMedia: Sendable, Equatable {
@@ -62,13 +121,12 @@ public struct MessageMedia: Sendable, Equatable {
 public struct OpenedMessageRecordWithConversationContext: Sendable, Equatable {
   public let conversationDisplayName: String
   public let conversationParticipantDisplayNames: [String]
-  public let conversationContextMessageRecordsInDisplayOrder: [MessageRecord]
+  public let conversationContextMessageRecordsNewestFirst: [MessageRecord]
   public let openedMessageRecordReference: CanonicalArchiveRecordReference
   public let openedMessageRecordAnchor: RecordAnchorIdentifier
   public let earlierConversationContextMessagesOmitted: Bool
   public let laterConversationContextMessagesOmitted: Bool
   public let conversationRecordReference: CanonicalArchiveRecordReference
-  public let openedMessageMedia: MessageMedia?
   public let conversationTrawlLink: GloballyRoutableTrawlLink
 }
 
@@ -134,6 +192,18 @@ public struct CalendarEventAttendee: Sendable, Equatable {
   public let attendeeAttendanceStatus: CalendarEventAttendeeAttendanceStatus?
 }
 
+public struct CalendarOwnerOrPurposeAnnotation: Sendable, Equatable {
+  public let calendarOwnerOrPurposeDescription: String
+  public let calendarOwnerOrPurposeDescriptionStatedDate:
+    CalendarOwnerOrPurposeDescriptionStatedDate
+}
+
+public struct CalendarOwnerOrPurposeDescriptionStatedDate: Sendable, Equatable {
+  public let calendarYear: Int32
+  public let calendarMonthNumber: Int32
+  public let calendarDayOfMonth: Int32
+}
+
 public struct CalendarEventRecord: Sendable, Equatable {
   public let canonicalRecordReference: CanonicalArchiveRecordReference
   public let calendarEventStartTime: ArchiveRecordAssociatedTimeForDisplay?
@@ -141,6 +211,7 @@ public struct CalendarEventRecord: Sendable, Equatable {
   public let calendarEventDisplayName: String
   public let calendarDisplayName: String
   public let calendarAccountDisplayName: String
+  public let calendarOwnerOrPurposeAnnotation: CalendarOwnerOrPurposeAnnotation?
   public let calendarEventAvailability: CalendarEventAvailability?
   public let calendarEventLocation: CalendarEventLocation?
   public let calendarEventOrganizer: PersonRelatedToArchiveRecord?

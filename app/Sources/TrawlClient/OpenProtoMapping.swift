@@ -37,6 +37,11 @@ extension Trawl_Open_OpenRecord {
         try calendarEventRecord.decodedCalendarEventRecord(
           canonicalOpenedRecordReference: canonicalOpenedRecordReference,
           registeredTrawler: registeredTrawler))
+    case .openedNoteRecord(let openedNoteRecord):
+      openedRecordContent = .note(
+        try openedNoteRecord.decodedOpenedNoteRecord(
+          canonicalOpenedRecordReference: canonicalOpenedRecordReference,
+          registeredTrawler: registeredTrawler))
     case .trawlerSpecificOpenedRecordPresentation(let trawlerSpecificOpenedRecordPresentation):
       openedRecordContent = .trawlerSpecificRecordPresentation(
         try trawlerSpecificOpenedRecordPresentation.decodedTrawlerSpecificOpenedRecordPresentation(
@@ -50,6 +55,61 @@ extension Trawl_Open_OpenRecord {
       recordTrawler: registeredTrawler,
       canonicalRecordReference: canonicalOpenedRecordReference,
       openedRecordContent: openedRecordContent)
+  }
+}
+
+extension Trawl_Note_OpenedNoteRecord {
+  fileprivate func decodedOpenedNoteRecord(
+    canonicalOpenedRecordReference: CanonicalArchiveRecordReference,
+    registeredTrawler: RegisteredTrawlerIdentity
+  ) throws -> OpenedNoteRecord {
+    let canonicalNoteRecordReference =
+      canonicalNoteRecordReference.decodedCanonicalArchiveRecordReference
+    let canonicalOpenedNoteVersionRecordReference =
+      canonicalOpenedNoteVersionRecordReference.decodedCanonicalArchiveRecordReference
+    let expectedOpenedRecordReference =
+      specificRecoveredNoteVersionWasOpened
+      ? canonicalOpenedNoteVersionRecordReference : canonicalNoteRecordReference
+    let noteDisplayNameAnchor = noteDisplayNameAnchor.decodedRecordAnchorIdentifier
+    let openedNoteBodyAnchor = openedNoteBodyAnchor.decodedRecordAnchorIdentifier
+    guard
+      canonicalOpenedRecordReference == expectedOpenedRecordReference,
+      isCanonicalTrawlerRecordReference(
+        canonicalNoteRecordReference,
+        registeredTrawler: registeredTrawler),
+      isCanonicalTrawlerRecordReference(
+        canonicalOpenedNoteVersionRecordReference,
+        registeredTrawler: registeredTrawler),
+      isValidAnchorIdentifier(noteDisplayNameAnchor),
+      isValidAnchorIdentifier(openedNoteBodyAnchor),
+      let decodedOpenedNoteBody = decodedOpenedNoteBody()
+    else {
+      throw TrawlClientError.invalidProtobuf
+    }
+    return OpenedNoteRecord(
+      canonicalNoteRecordReference: canonicalNoteRecordReference,
+      canonicalOpenedNoteVersionRecordReference: canonicalOpenedNoteVersionRecordReference,
+      noteDisplayName: noteDisplayName,
+      noteFolderDisplayName: noteFolderDisplayName,
+      noteCreatedTime: hasNoteCreatedTime ? noteCreatedTime.date : nil,
+      noteModifiedTime: hasNoteModifiedTime ? noteModifiedTime.date : nil,
+      openedNoteVersionTime: hasOpenedNoteVersionTime ? openedNoteVersionTime.date : nil,
+      recoveredNoteVersionCount: recoveredNoteVersionCount,
+      openedNoteBody: decodedOpenedNoteBody,
+      specificRecoveredNoteVersionWasOpened: specificRecoveredNoteVersionWasOpened,
+      noteDisplayNameAnchor: noteDisplayNameAnchor,
+      openedNoteBodyAnchor: openedNoteBodyAnchor)
+  }
+
+  private func decodedOpenedNoteBody() -> OpenedNoteBody? {
+    switch openedNoteBody.bodyAvailability {
+    case .availableNoteBody(let availableBody):
+      .available(noteBodyText: availableBody.noteBodyText)
+    case .unavailableNoteBody:
+      .unavailable
+    case nil:
+      nil
+    }
   }
 }
 
@@ -125,8 +185,9 @@ extension Trawl_Message_MessageRecord {
       canonicalRecordReference: canonicalMessageRecordReference,
       peopleRelatedToMessage:
         peopleRelatedToMessage.map { $0.decodedPersonRelatedToArchiveRecord() },
-      displayedMessageOrMediaText: displayedMessageOrMediaText,
-      conversationDisplayContext: conversationDisplayContext)
+      messageText: messageText,
+      conversationDisplayName: conversationDisplayName,
+      messageMedia: hasMessageMedia ? try messageMedia.decodedMessageMedia() : nil)
   }
 }
 
@@ -144,10 +205,16 @@ extension Trawl_Message_MessageMedia {
 extension Trawl_Message_MessageMediaContentKind {
   fileprivate func decodedMessageMediaContentKind() -> MessageMediaContentKind? {
     switch self {
+    case .attachment: .attachment
     case .image: .image
     case .video: .video
     case .audio: .audio
     case .file: .file
+    case .gif: .gif
+    case .sticker: .sticker
+    case .link: .link
+    case .photoOrVideo: .photoOrVideo
+    case .voiceOrInstantVideo: .voiceOrInstantVideo
     case .unspecified, .UNRECOGNIZED: nil
     }
   }
@@ -166,11 +233,10 @@ extension Trawl_Message_OpenedMessageRecordWithConversationContext {
       conversationRecordReference.decodedCanonicalArchiveRecordReference
     let conversationTrawlLink =
       conversationTrawlLink.decodedGloballyRoutableTrawlLink
-    let conversationContextMessageRecords = try
-      conversationContextMessageRecordsInDisplayOrder.map {
-        try $0.decodedMessageRecord(
-          registeredTrawler: registeredTrawler)
-      }
+    let conversationContextMessageRecords = try conversationContextMessageRecordsNewestFirst.map {
+      try $0.decodedMessageRecord(
+        registeredTrawler: registeredTrawler)
+    }
     let openedMessageCount = conversationContextMessageRecords.count {
       $0.canonicalRecordReference
         == canonicalOpenedMessageRecordReference
@@ -191,14 +257,12 @@ extension Trawl_Message_OpenedMessageRecordWithConversationContext {
     return OpenedMessageRecordWithConversationContext(
       conversationDisplayName: conversationDisplayName,
       conversationParticipantDisplayNames: conversationParticipantDisplayNames,
-      conversationContextMessageRecordsInDisplayOrder: conversationContextMessageRecords,
+      conversationContextMessageRecordsNewestFirst: conversationContextMessageRecords,
       openedMessageRecordReference: canonicalOpenedMessageRecordReference,
       openedMessageRecordAnchor: openedMessageRecordAnchor,
       earlierConversationContextMessagesOmitted: earlierConversationContextMessagesOmitted,
       laterConversationContextMessagesOmitted: laterConversationContextMessagesOmitted,
       conversationRecordReference: canonicalConversationRecordReference,
-      openedMessageMedia:
-        hasOpenedMessageMedia ? try openedMessageMedia.decodedMessageMedia() : nil,
       conversationTrawlLink: conversationTrawlLink)
   }
 }
@@ -309,6 +373,10 @@ extension Trawl_CalendarEvent_CalendarEventRecord {
       calendarEventDisplayName: calendarEventDisplayName,
       calendarDisplayName: calendarDisplayName,
       calendarAccountDisplayName: calendarAccountDisplayName,
+      calendarOwnerOrPurposeAnnotation:
+        hasCalendarOwnerOrPurposeAnnotation
+        ? try calendarOwnerOrPurposeAnnotation.decodedCalendarOwnerOrPurposeAnnotation()
+        : nil,
       calendarEventAvailability:
         calendarEventAvailability.decodedCalendarEventAvailability(),
       calendarEventLocation:
@@ -336,6 +404,25 @@ extension Trawl_CalendarEvent_CalendarEventRecord {
   }
 }
 
+extension Trawl_Calendar_CalendarOwnerOrPurposeAnnotation {
+  fileprivate func decodedCalendarOwnerOrPurposeAnnotation() throws
+    -> CalendarOwnerOrPurposeAnnotation
+  {
+    guard hasCalendarOwnerOrPurposeDescriptionStatedDate else {
+      throw TrawlClientError.invalidProtobuf
+    }
+    return CalendarOwnerOrPurposeAnnotation(
+      calendarOwnerOrPurposeDescription: calendarOwnerOrPurposeDescription,
+      calendarOwnerOrPurposeDescriptionStatedDate:
+        CalendarOwnerOrPurposeDescriptionStatedDate(
+          calendarYear: calendarOwnerOrPurposeDescriptionStatedDate.calendarYear,
+          calendarMonthNumber:
+            calendarOwnerOrPurposeDescriptionStatedDate.calendarMonthNumber,
+          calendarDayOfMonth:
+            calendarOwnerOrPurposeDescriptionStatedDate.calendarDayOfMonth))
+  }
+}
+
 extension Trawl_Open_TrawlerSpecificOpenedRecordPresentation {
   fileprivate func decodedTrawlerSpecificOpenedRecordPresentation(
     canonicalOpenedRecordReference: CanonicalArchiveRecordReference,
@@ -348,9 +435,9 @@ extension Trawl_Open_TrawlerSpecificOpenedRecordPresentation {
     return TrawlerSpecificOpenedRecordPresentation(
       detailPresentation:
         try detailPresentation
-          .decodedTrawlerSpecificCommandDetailPresentation(
-            canonicalOpenedRecordReference: canonicalOpenedRecordReference,
-            requestedTrawlLink: requestedTrawlLink))
+        .decodedTrawlerSpecificCommandDetailPresentation(
+          canonicalOpenedRecordReference: canonicalOpenedRecordReference,
+          requestedTrawlLink: requestedTrawlLink))
   }
 }
 

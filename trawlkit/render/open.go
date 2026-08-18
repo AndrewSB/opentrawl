@@ -9,6 +9,7 @@ import (
 	conversation "github.com/opentrawl/opentrawl/trawlkit/proto/trawl/conversation"
 	identity "github.com/opentrawl/opentrawl/trawlkit/proto/trawl/identity"
 	message "github.com/opentrawl/opentrawl/trawlkit/proto/trawl/message"
+	note "github.com/opentrawl/opentrawl/trawlkit/proto/trawl/note"
 	open "github.com/opentrawl/opentrawl/trawlkit/proto/trawl/open"
 	person "github.com/opentrawl/opentrawl/trawlkit/proto/trawl/person"
 )
@@ -57,6 +58,12 @@ func WriteOpenResponse(
 			typedOpenedRecord.CalendarEventRecord,
 			response.GetRequestedTrawlLink(),
 		)
+	case *open.OpenRecord_OpenedNoteRecord:
+		return writeOpenedNoteRecord(
+			writer,
+			typedOpenedRecord.OpenedNoteRecord,
+			response.GetRequestedTrawlLink(),
+		)
 	case *open.OpenRecord_TrawlerSpecificOpenedRecordPresentation:
 		trawlerSpecificOpenedRecordPresentation := typedOpenedRecord.TrawlerSpecificOpenedRecordPresentation
 		if trawlerSpecificOpenedRecordPresentation == nil {
@@ -76,6 +83,92 @@ func WriteOpenResponse(
 	default:
 		return fmt.Errorf("open record has no typed record")
 	}
+}
+
+func writeOpenedNoteRecord(
+	writer io.Writer,
+	openedNoteRecord *note.OpenedNoteRecord,
+	requestedTrawlLink *identity.GloballyRoutableTrawlLink,
+) error {
+	if openedNoteRecord == nil {
+		return fmt.Errorf("opened note record is missing")
+	}
+	noteDisplayName := strings.TrimSpace(openedNoteRecord.GetNoteDisplayName())
+	if noteDisplayName == "" {
+		noteDisplayName = "Note"
+	}
+	fields := make([]CardField, 0, 5)
+	if folderDisplayName := strings.TrimSpace(openedNoteRecord.GetNoteFolderDisplayName()); folderDisplayName != "" {
+		fields = append(fields, CardField{Label: "Folder", Value: folderDisplayName})
+	}
+	if createdTime := exactTimestampForHumanOutput(openedNoteRecord.GetNoteCreatedTime()); createdTime != "" {
+		fields = append(fields, CardField{Label: "Created", Value: createdTime})
+	}
+	if openedNoteRecord.GetSpecificRecoveredNoteVersionWasOpened() {
+		if recoveredVersionTime := exactTimestampForHumanOutput(openedNoteRecord.GetOpenedNoteVersionTime()); recoveredVersionTime != "" {
+			fields = append(fields, CardField{Label: "Recovered version", Value: recoveredVersionTime})
+		}
+	} else if modifiedTime := exactTimestampForHumanOutput(openedNoteRecord.GetNoteModifiedTime()); modifiedTime != "" {
+		fields = append(fields, CardField{Label: "Modified", Value: modifiedTime})
+	}
+	fields = append(fields, CardField{
+		Label: "Versions",
+		Value: FormatInteger(int64(openedNoteRecord.GetRecoveredNoteVersionCount())),
+	})
+	if openedNoteRecord.GetRecoveredNoteVersionCount() > 0 {
+		fields = append(fields, CardField{
+			Label: "List versions",
+			Value: trawlCommandLineForDisplay(writer, []string{
+				"notes",
+				"versions",
+				globallyRoutableTrawlLinkText(requestedTrawlLink),
+			}),
+			ValueIsTrawlCommandAction: true,
+		})
+	}
+	body := ""
+	switch openedNoteBody := openedNoteRecord.GetOpenedNoteBody().GetBodyAvailability().(type) {
+	case *note.OpenedNoteBody_AvailableNoteBody:
+		var moreNoteBodyTextIsOmitted bool
+		body, moreNoteBodyTextIsOmitted = openedNoteBodyTextForHumanPresentation(
+			openedNoteBody.AvailableNoteBody.GetNoteBodyText(),
+		)
+		body = strings.TrimSpace(body)
+		if moreNoteBodyTextIsOmitted {
+			body = strings.TrimSpace(body) + "\n\nMore note text is omitted."
+		}
+	case *note.OpenedNoteBody_UnavailableNoteBody:
+		body = "Note text is unavailable."
+	}
+	return WriteCard(writer, Card{Title: noteDisplayName, Fields: fields, Body: body})
+}
+
+const (
+	maximumDisplayedOpenedNoteBodyUnicodeCodePointCount = 1200
+	maximumDisplayedOpenedNoteBodyLineCount             = 40
+)
+
+func openedNoteBodyTextForHumanPresentation(completeNoteBodyText string) (string, bool) {
+	completeNoteBodyUnicodeCodePoints := []rune(completeNoteBodyText)
+	displayedNoteBodyUnicodeCodePoints := make(
+		[]rune,
+		0,
+		min(len(completeNoteBodyUnicodeCodePoints), maximumDisplayedOpenedNoteBodyUnicodeCodePointCount),
+	)
+	displayedLineCount := 1
+	for _, unicodeCodePoint := range completeNoteBodyUnicodeCodePoints {
+		if len(displayedNoteBodyUnicodeCodePoints) >= maximumDisplayedOpenedNoteBodyUnicodeCodePointCount {
+			return string(displayedNoteBodyUnicodeCodePoints), true
+		}
+		if unicodeCodePoint == '\n' && displayedLineCount >= maximumDisplayedOpenedNoteBodyLineCount {
+			return string(displayedNoteBodyUnicodeCodePoints), true
+		}
+		displayedNoteBodyUnicodeCodePoints = append(displayedNoteBodyUnicodeCodePoints, unicodeCodePoint)
+		if unicodeCodePoint == '\n' {
+			displayedLineCount++
+		}
+	}
+	return completeNoteBodyText, false
 }
 
 func WriteOpenedMessageRecordWithConversationContext(
@@ -109,42 +202,43 @@ func WriteOpenedMessageRecordWithConversationContext(
 	if _, err := fmt.Fprintln(writer); err != nil {
 		return err
 	}
-	contextMessageRecords := openedMessage.GetConversationContextMessageRecordsInDisplayOrder()
-	rows := make([][]string, 0, len(contextMessageRecords))
+	contextMessageRecords := openedMessage.GetConversationContextMessageRecordsNewestFirst()
+	rows := make([]messageListDisplayRow, 0, len(contextMessageRecords))
 	canonicalOpenedMessageRecordReference := openedMessage.GetOpenedMessageRecordReference()
-	maximumSurroundingMessageTextDisplayWidth := max(OutputWidth(writer)*2, 80)
+	var mediaForOpenedMessage *message.MessageMedia
 	for _, messageRecord := range contextMessageRecords {
 		if messageRecord == nil {
 			continue
 		}
-		timeDisplay := trawlerSpecificCommandAssociatedTime(messageRecord.GetMessageTime())
-		messageText := messageRecord.GetDisplayedMessageOrMediaText()
-		if canonicalArchiveRecordReferencesMatch(
+		selected := canonicalArchiveRecordReferencesMatch(
 			messageRecord.GetCanonicalRecordReference(),
 			canonicalOpenedMessageRecordReference,
-		) {
-			timeDisplay = strings.TrimSpace("→ " + timeDisplay)
-		} else {
-			messageText = Truncate(messageText, maximumSurroundingMessageTextDisplayWidth)
+		)
+		if selected {
+			mediaForOpenedMessage = messageRecord.GetMessageMedia()
 		}
-		rows = append(rows, []string{
-			timeDisplay,
-			displayedPeopleWithRoles(
+		rows = append(rows, messageListDisplayRow{
+			selected: selected,
+			when:     trawlerSpecificCommandAssociatedTime(messageRecord.GetMessageTime()),
+			senderDisplayContext: displayedPeopleWithRoles(
 				messageRecord.GetPeopleRelatedToMessage(),
 				person.PersonRoleInArchiveRecord_PERSON_ROLE_IN_ARCHIVE_RECORD_SENDER,
 				person.PersonRoleInArchiveRecord_PERSON_ROLE_IN_ARCHIVE_RECORD_AUTHOR,
 			),
-			messageText,
+			recipientDisplayContext: displayedPeopleWithRoles(
+				messageRecord.GetPeopleRelatedToMessage(),
+				person.PersonRoleInArchiveRecord_PERSON_ROLE_IN_ARCHIVE_RECORD_RECIPIENT,
+			),
+			displayedMessageOrMedia: messageTextAndMediaForHumanOutput(
+				messageRecord.GetMessageText(),
+				messageRecord.GetMessageMedia(),
+			),
 		})
 	}
-	if err := WriteTable(writer, []TableColumn{
-		{Header: "time", MinimumWidth: 16},
-		{Header: "from", Wrap: true, MaximumWrappedLines: 2},
-		{Header: "text", Wrap: true},
-	}, rows); err != nil {
+	if err := writeMessageListRows(writer, rows); err != nil {
 		return err
 	}
-	if err := writeOpenedMessageMedia(writer, openedMessage.GetOpenedMessageMedia()); err != nil {
+	if err := writeOpenedMessageMedia(writer, mediaForOpenedMessage); err != nil {
 		return err
 	}
 	earlierMessagesOmitted := openedMessage.GetEarlierConversationContextMessagesOmitted()
@@ -214,6 +308,8 @@ func writeOpenedMessageMedia(writer io.Writer, media *message.MessageMedia) erro
 
 func messageMediaContentKindDisplayName(messageMediaContentKind message.MessageMediaContentKind) string {
 	switch messageMediaContentKind {
+	case message.MessageMediaContentKind_MESSAGE_MEDIA_CONTENT_KIND_ATTACHMENT:
+		return "Attachment"
 	case message.MessageMediaContentKind_MESSAGE_MEDIA_CONTENT_KIND_IMAGE:
 		return "Image"
 	case message.MessageMediaContentKind_MESSAGE_MEDIA_CONTENT_KIND_VIDEO:
@@ -222,6 +318,16 @@ func messageMediaContentKindDisplayName(messageMediaContentKind message.MessageM
 		return "Audio"
 	case message.MessageMediaContentKind_MESSAGE_MEDIA_CONTENT_KIND_FILE:
 		return "File"
+	case message.MessageMediaContentKind_MESSAGE_MEDIA_CONTENT_KIND_GIF:
+		return "GIF"
+	case message.MessageMediaContentKind_MESSAGE_MEDIA_CONTENT_KIND_STICKER:
+		return "Sticker"
+	case message.MessageMediaContentKind_MESSAGE_MEDIA_CONTENT_KIND_LINK:
+		return "Link"
+	case message.MessageMediaContentKind_MESSAGE_MEDIA_CONTENT_KIND_PHOTO_OR_VIDEO:
+		return "Photo or video"
+	case message.MessageMediaContentKind_MESSAGE_MEDIA_CONTENT_KIND_VOICE_OR_INSTANT_VIDEO:
+		return "Voice message or instant video"
 	default:
 		return ""
 	}
@@ -238,11 +344,17 @@ func writeConversationRecord(
 	participantDisplayNames := conversationParticipantDisplayNamesFromIdentitiesObservedByTrawlerArchive(
 		conversationRecord.GetConversationParticipantIdentitiesObservedByTrawlerArchive(),
 	)
-	fields := []CardField{{
-		Label: "People",
-		Value: conversationParticipantDisplayNamesWithUnavailableCount(
+	numberOfConversationParticipantsForHumanOutput :=
+		resolveNumberOfDistinctConversationParticipantRecordsForHumanOutput(
 			participantDisplayNames,
 			conversationRecord.NumberOfDistinctConversationParticipantRecordsObservedByTrawlerArchive,
+		)
+	fields := []CardField{{
+		Label: "People",
+		Value: conversationParticipantDisplayNamesForOpenedConversation(
+			writer,
+			participantDisplayNames,
+			numberOfConversationParticipantsForHumanOutput,
 		),
 	}}
 	if mostRecentActivityTime := conversationRecord.GetMostRecentConversationActivityTime(); mostRecentActivityTime != nil && mostRecentActivityTime.IsValid() {
@@ -257,16 +369,47 @@ func writeConversationRecord(
 	}
 	var hints []string
 	if globallyRoutableTrawlLinkForHumanOutput != "" {
-		hints = []string{"Messages: " + trawlCommandLineForDisplay(
-			writer,
-			[]string{"messages", "--conversation", globallyRoutableTrawlLinkForHumanOutput},
-		)}
+		hints = []string{
+			"Messages: " + trawlCommandLineForDisplay(
+				writer,
+				[]string{"messages", "--conversation", globallyRoutableTrawlLinkForHumanOutput},
+			),
+		}
+		if numberOfConversationParticipantsForHumanOutput > 0 {
+			hints = append(hints, "Participants: "+trawlCommandLineForDisplay(
+				writer,
+				[]string{"open", globallyRoutableTrawlLinkForHumanOutput, "--participants"},
+			))
+		}
 	}
 	return WriteCard(writer, Card{
 		Title:  strings.TrimSpace(conversationRecord.GetConversationDisplayName()),
 		Fields: fields,
 		Hints:  hints,
 	})
+}
+
+const maximumOpenedConversationParticipantPreviewLineCount = 6
+
+func conversationParticipantDisplayNamesForOpenedConversation(
+	writer io.Writer,
+	participantDisplayNames []string,
+	numberOfConversationParticipantsForHumanOutput uint64,
+) string {
+	numberOfParticipantDisplayNamesToShow := len(participantDisplayNames)
+	for {
+		preview := conversationParticipantDisplayNamesAndHiddenCount(
+			participantDisplayNames,
+			numberOfParticipantDisplayNamesToShow,
+			numberOfConversationParticipantsForHumanOutput,
+		)
+		wrappedPreview := WrapWithIndent("People: ", preview, OutputWidth(writer), "")
+		if len(wrappedPreview) <= maximumOpenedConversationParticipantPreviewLineCount ||
+			numberOfParticipantDisplayNamesToShow == 0 {
+			return preview
+		}
+		numberOfParticipantDisplayNamesToShow--
+	}
 }
 
 func writeCalendarEventRecord(
@@ -282,6 +425,7 @@ func writeCalendarEventRecord(
 		{Label: "Ends", Value: trawlerSpecificCommandAssociatedTime(calendarEventRecord.GetCalendarEventEndTime())},
 		{Label: "Calendar", Value: strings.TrimSpace(calendarEventRecord.GetCalendarDisplayName())},
 		{Label: "Account", Value: strings.TrimSpace(calendarEventRecord.GetCalendarAccountDisplayName())},
+		{Label: "Owner or purpose", Value: calendarOwnerOrPurposeDescription(calendarEventRecord.GetCalendarOwnerOrPurposeAnnotation())},
 		{Label: "Where", Value: calendarEventPlace(calendarEventRecord.GetCalendarEventLocation())},
 		{Label: "People", Value: calendarEventPeople(calendarEventRecord)},
 		{Label: "URL", Value: strings.TrimSpace(calendarEventRecord.GetCalendarEventHttpsUrl())},

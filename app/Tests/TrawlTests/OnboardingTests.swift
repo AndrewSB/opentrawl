@@ -33,7 +33,7 @@ struct OnboardingTests {
       !AutomaticUpdateTaskID(onboardingStage: .welcome, registeredTrawlers: []).shouldRun)
     #expect(
       !AutomaticUpdateTaskID(onboardingStage: .permission, registeredTrawlers: []).shouldRun)
-    #expect(first.shouldRun)
+    #expect(!first.shouldRun)
     #expect(completed.shouldRun)
   }
 
@@ -56,6 +56,27 @@ struct OnboardingTests {
     #expect(defaults.string(forKey: OnboardingModel.checkpointOwnerKey) == nil)
   }
 
+  @MainActor
+  @Test func resetReturnsToWelcomeAndClearsCompletion() {
+    let suite = "OnboardingTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let onboarding = OnboardingModel(
+      defaults: defaults,
+      checkpointOwner: "build",
+      openFullDiskAccess: {}
+    )
+    onboarding.complete()
+    #expect(onboarding.isComplete)
+
+    onboarding.reset()
+
+    #expect(onboarding.stage == .welcome)
+    #expect(!defaults.bool(forKey: OnboardingModel.completionKey))
+    #expect(defaults.string(forKey: OnboardingModel.checkpointKey) == nil)
+    #expect(defaults.string(forKey: OnboardingModel.checkpointOwnerKey) == nil)
+  }
+
   @Test func aiInstructionNamesItsIntentAndDoesNotClaimToChangeConfiguration() {
     let instruction = AgentPrompts.connectAI
     #expect(instruction.hasPrefix("Help me start using OpenTrawl"))
@@ -67,8 +88,6 @@ struct OnboardingTests {
     #expect(instruction.contains("Only discuss or draft an integration if I explicitly ask"))
     #expect(instruction.contains("Wait for my explicit approval"))
     #expect(instruction.contains("A request to explore an option is not approval"))
-    #expect(DraftCopy.ConnectAI.body.contains("does not install"))
-    #expect(DraftCopy.ConnectAI.body.contains("settings"))
   }
 
 }

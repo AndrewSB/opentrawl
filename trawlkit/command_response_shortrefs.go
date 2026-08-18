@@ -32,7 +32,7 @@ func trawlerCommandResponseCanonicalRecordReferences(
 	}
 	switch typedResponse := response.GetTypedTrawlerCommandResponse().(type) {
 	case *command.TrawlerCommandResponse_MessageListResponse:
-		for _, messageRecord := range typedResponse.MessageListResponse.GetMessageRecordsInDisplayOrder() {
+		for _, messageRecord := range typedResponse.MessageListResponse.GetMessageRecordsNewestFirst() {
 			if messageRecord != nil {
 				add(messageRecord.GetCanonicalRecordReference())
 			}
@@ -55,6 +55,24 @@ func trawlerCommandResponseCanonicalRecordReferences(
 		for _, calendarEventRecord := range typedResponse.CalendarEventListResponse.GetCalendarEventRecordsInDisplayOrder() {
 			if calendarEventRecord != nil {
 				add(calendarEventRecord.GetCanonicalRecordReference())
+			}
+		}
+	case *command.TrawlerCommandResponse_CalendarListResponse:
+		for _, calendarRecord := range typedResponse.CalendarListResponse.GetCalendarRecordsInDisplayOrder() {
+			if calendarRecord != nil {
+				add(calendarRecord.GetCanonicalRecordReference())
+			}
+		}
+	case *command.TrawlerCommandResponse_NoteListResponse:
+		for _, noteRecord := range typedResponse.NoteListResponse.GetNoteRecordsNewestFirst() {
+			if noteRecord != nil {
+				add(noteRecord.GetCanonicalRecordReference())
+			}
+		}
+	case *command.TrawlerCommandResponse_RecoveredNoteVersionListResponse:
+		for _, versionRecord := range typedResponse.RecoveredNoteVersionListResponse.GetRecoveredNoteVersionRecordsNewestFirst() {
+			if versionRecord != nil {
+				add(versionRecord.GetCanonicalRecordReference())
 			}
 		}
 	case *command.TrawlerCommandResponse_TrawlerSpecificCommandResponse:

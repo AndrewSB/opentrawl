@@ -1,105 +1,106 @@
 package render
 
 import (
-	"fmt"
 	"io"
 	"strings"
+
+	message "github.com/opentrawl/opentrawl/trawlkit/proto/trawl/message"
+)
+
+const (
+	messageListTimeColumnWidth           = 16
+	messageListMinimumSenderColumnWidth  = 10
+	messageListMinimumContextColumnWidth = 16
 )
 
 func writeMessageListRows(writer io.Writer, rows []messageListDisplayRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
 	outputWidth := OutputWidth(writer)
-	if outputWidth >= messageListWideOutputMinimumWidth {
-		return writeWideMessageListRows(writer, rows, outputWidth)
-	}
-	return writeNarrowMessageListRows(writer, rows, outputWidth)
-}
-
-func writeWideMessageListRows(writer io.Writer, rows []messageListDisplayRow, outputWidth int) error {
+	showSelection := false
 	showContext := false
-	openLinkWidth := len("link")
-	fromWidth := len("from")
-	contextWidth := len("to / in")
+	showLinks := false
 	for _, row := range rows {
-		showContext = showContext || row.recipientDisplayContext != "" || row.conversationDisplayContext != ""
-		openLinkWidth = max(openLinkWidth, DisplayWidth(row.globallyRoutableTrawlLink))
-		fromWidth = max(fromWidth, min(DisplayWidth(row.senderDisplayContext), messageListMaximumSenderColumnWidth))
-		contextWidth = max(contextWidth, min(DisplayWidth(messageListCompactContext(row)), messageListMaximumContextWidth))
+		showSelection = showSelection || row.selected
+		showContext = showContext || messageListCompactContext(row) != ""
+		showLinks = showLinks || row.globallyRoutableTrawlLink != ""
 	}
 
-	columnCount := 4
+	columns := make([]TableColumn, 0, 6)
+	if showSelection {
+		columns = append(columns, TableColumn{Header: "", Width: 1, MinimumWidth: 1})
+	}
+	columns = append(columns,
+		TableColumn{Header: "time", Width: messageListTimeColumnWidth, MinimumWidth: messageListTimeColumnWidth},
+		TableColumn{
+			Header:              "from",
+			MinimumWidth:        messageListMinimumSenderColumnWidth,
+			Wrap:                true,
+			MaximumWrappedLines: 3,
+		},
+		TableColumn{
+			Header:              "message",
+			Wrap:                true,
+			MaximumWrappedLines: 3,
+		},
+	)
+	messageColumnIndex := 2
+	if showSelection {
+		messageColumnIndex++
+	}
+	contextColumnIndex := -1
 	if showContext {
-		columnCount++
+		contextColumnIndex = len(columns)
+		columns = append(columns, TableColumn{
+			Header:              "context",
+			MinimumWidth:        messageListMinimumContextColumnWidth,
+			Wrap:                true,
+			MaximumWrappedLines: 2,
+		})
 	}
-	textWidth := outputWidth - messageListWhenColumnWidth - fromWidth - openLinkWidth - (columnCount-1)*len(renderTableGap)
-	if showContext {
-		textWidth -= contextWidth
+	if showLinks {
+		columns = append(columns, TableColumn{
+			Header:                  "link",
+			NeverTruncateCellValues: true,
+		})
 	}
-	if textWidth < messageListMinimumUsefulWideTextColumnWidth {
-		return writeNarrowMessageListRows(writer, rows, outputWidth)
-	}
-
-	columns := []TableColumn{
-		{Header: "when", Width: messageListWhenColumnWidth, MinimumWidth: messageListWhenColumnWidth},
-		{Header: "from", Width: fromWidth, MinimumWidth: fromWidth},
-		{Header: "text", Width: textWidth, MinimumWidth: textWidth, Wrap: true, MaximumWrappedLines: 2},
-	}
-	if showContext {
-		columns = append(columns, TableColumn{Header: "to / in", Width: contextWidth, MinimumWidth: contextWidth})
-	}
-	columns = append(columns, TableColumn{
-		Header:                  "link",
-		Width:                   openLinkWidth,
-		MinimumWidth:            openLinkWidth,
-		NeverTruncateCellValues: true,
-	})
-
 	tableRows := make([][]string, 0, len(rows))
 	for _, row := range rows {
-		tableRow := []string{row.when, row.senderDisplayContext, row.displayedMessageOrMedia}
-		if showContext {
+		tableRow := make([]string, 0, len(columns))
+		if showSelection {
+			selectionMarker := ""
+			if row.selected {
+				selectionMarker = "→"
+			}
+			tableRow = append(tableRow, selectionMarker)
+		}
+		tableRow = append(tableRow, row.when, row.senderDisplayContext, row.displayedMessageOrMedia)
+		if contextColumnIndex >= 0 {
 			tableRow = append(tableRow, messageListCompactContext(row))
 		}
-		tableRows = append(tableRows, append(tableRow, row.globallyRoutableTrawlLink))
+		if showLinks {
+			tableRow = append(tableRow, row.globallyRoutableTrawlLink)
+		}
+		tableRows = append(tableRows, tableRow)
 	}
-	renderColumns := tableRenderColumns(columns, tableRows, outputWidth)
+	renderColumns := tableRenderColumnsWithPrimaryHumanContentColumn(
+		columns,
+		tableRows,
+		outputWidth,
+		messageColumnIndex,
+	)
+
 	if err := writeRenderHeader(writer, renderColumns); err != nil {
 		return err
 	}
-	for _, tableRow := range tableRows {
-		if err := writeRenderRow(writer, renderColumns, tableRow); err != nil {
-			return err
+	for rowIndex, row := range rows {
+		rowColumns := renderColumns
+		if row.selected {
+			rowColumns = append([]renderColumn(nil), renderColumns...)
+			rowColumns[messageColumnIndex].Clamp = 0
 		}
-	}
-	return nil
-}
-
-func writeNarrowMessageListRows(writer io.Writer, rows []messageListDisplayRow, outputWidth int) error {
-	fromWidth := len("from")
-	for _, row := range rows {
-		fromWidth = max(fromWidth, min(DisplayWidth(row.senderDisplayContext), messageListMaximumSenderColumnWidth))
-	}
-	textWidth := outputWidth - messageListWhenColumnWidth - fromWidth - 2*len(renderTableGap)
-	if textWidth < 1 {
-		textWidth = 1
-	}
-	columns := []renderColumn{
-		{Width: messageListWhenColumnWidth},
-		{Width: fromWidth},
-		{Width: textWidth, Wrap: true, Clamp: 2},
-	}
-	if err := writeRenderRowWithMode(writer, columns, []string{"when", "from", "text"}, true); err != nil {
-		return err
-	}
-	for _, row := range rows {
-		if err := writeRenderRowWithMode(
-			writer,
-			columns,
-			[]string{row.when, row.senderDisplayContext, row.displayedMessageOrMedia},
-			false,
-		); err != nil {
-			return err
-		}
-		if err := writeMessageListGroupedMetadata(writer, row, outputWidth); err != nil {
+		if err := writeRenderRow(writer, rowColumns, tableRows[rowIndex]); err != nil {
 			return err
 		}
 	}
@@ -108,41 +109,33 @@ func writeNarrowMessageListRows(writer io.Writer, rows []messageListDisplayRow, 
 
 func messageListCompactContext(row messageListDisplayRow) string {
 	contextParts := make([]string, 0, 2)
-	if row.recipientDisplayContext != "" {
+	if row.recipientDisplayContext != "" &&
+		(!strings.EqualFold(row.recipientDisplayContext, "me") || strings.EqualFold(row.senderDisplayContext, "me")) {
 		contextParts = append(contextParts, "to "+row.recipientDisplayContext)
 	}
-	if row.conversationDisplayContext != "" {
-		contextParts = append(contextParts, "in "+row.conversationDisplayContext)
+	conversationDisplayName := strings.TrimSpace(row.conversationDisplayName)
+	if conversationDisplayName != "" &&
+		!strings.EqualFold(conversationDisplayName, strings.TrimSpace(row.senderDisplayContext)) &&
+		!strings.EqualFold(conversationDisplayName, strings.TrimSpace(row.recipientDisplayContext)) {
+		contextParts = append(contextParts, conversationDisplayName)
 	}
 	return strings.Join(contextParts, " · ")
 }
 
-func writeMessageListGroupedMetadata(writer io.Writer, row messageListDisplayRow, outputWidth int) error {
-	contextParts := make([]string, 0, 2)
-	if row.recipientDisplayContext != "" {
-		contextParts = append(contextParts, "To: "+row.recipientDisplayContext)
+func messageTextAndMediaForHumanOutput(messageText string, media *message.MessageMedia) string {
+	messageText = strings.TrimSpace(messageText)
+	if media == nil {
+		return messageText
 	}
-	if row.conversationDisplayContext != "" {
-		contextParts = append(contextParts, "Conversation: "+row.conversationDisplayContext)
+	mediaDescription := messageMediaContentKindDisplayName(media.GetMessageMediaContentKind())
+	if mediaDescription == "" {
+		mediaDescription = "Attachment"
 	}
-	context := strings.Join(contextParts, " · ")
-	openCommand := trawlCommandLineForDisplay(writer, []string{"open", row.globallyRoutableTrawlLink})
-	groupedMetadata := strings.Trim(strings.Join([]string{context, "Open: " + openCommand}, " · "), " ·")
-	if DisplayWidth("  "+groupedMetadata) <= outputWidth {
-		_, err := fmt.Fprintln(writer, "  "+groupedMetadata)
-		return err
+	if mediaTitle := strings.TrimSpace(media.GetMessageMediaTitle()); mediaTitle != "" {
+		mediaDescription += ": " + mediaTitle
 	}
-	if context != "" {
-		for _, line := range WrapWithIndent("  ", context, outputWidth, "  ") {
-			if _, err := fmt.Fprintln(writer, line); err != nil {
-				return err
-			}
-		}
+	if messageText == "" {
+		return mediaDescription
 	}
-	for _, line := range shellCommandLines("  Open: ", "  ", openCommand, outputWidth) {
-		if _, err := fmt.Fprintln(writer, line); err != nil {
-			return err
-		}
-	}
-	return nil
+	return messageText + " · " + mediaDescription
 }

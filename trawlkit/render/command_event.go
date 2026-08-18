@@ -21,31 +21,47 @@ func WriteCalendarEventListResponse(
 		_, err := io.WriteString(writer, "No events match.\n")
 		return err
 	}
+	showCalendarOwnerOrPurposeDescription := false
+	for _, calendarEventRecord := range response.GetCalendarEventRecordsInDisplayOrder() {
+		if calendarOwnerOrPurposeDescription(calendarEventRecord.GetCalendarOwnerOrPurposeAnnotation()) != "" {
+			showCalendarOwnerOrPurposeDescription = true
+			break
+		}
+	}
 	rows := make([][]string, 0, len(response.GetCalendarEventRecordsInDisplayOrder()))
 	for _, calendarEventRecord := range response.GetCalendarEventRecordsInDisplayOrder() {
 		if calendarEventRecord == nil {
 			continue
 		}
-		rows = append(rows, []string{
+		row := []string{
 			calendarEventWhen(
 				calendarEventRecord.GetCalendarEventStartTime(),
 				calendarEventRecord.GetCalendarEventEndTime(),
 			),
 			strings.TrimSpace(calendarEventRecord.GetCalendarEventDisplayName()),
-			globallyRoutableTrawlLinkText(
-				globallyRoutableTrawlLinksByCanonicalRecordReference.
-					globallyRoutableTrawlLinkForCanonicalArchiveRecordReference(
-						calendarEventRecord.GetCanonicalRecordReference(),
-					),
-			),
-		})
+			strings.TrimSpace(calendarEventRecord.GetCalendarDisplayName()),
+		}
+		if showCalendarOwnerOrPurposeDescription {
+			row = append(row, calendarOwnerOrPurposeDescription(calendarEventRecord.GetCalendarOwnerOrPurposeAnnotation()))
+		}
+		row = append(row, globallyRoutableTrawlLinkText(
+			globallyRoutableTrawlLinksByCanonicalRecordReference.
+				globallyRoutableTrawlLinkForCanonicalArchiveRecordReference(
+					calendarEventRecord.GetCanonicalRecordReference(),
+				),
+		))
+		rows = append(rows, row)
 	}
 	columns := []TableColumn{
-		{Header: "when", MinimumWidth: 16},
-		{Header: "event", MinimumWidth: 16},
-		{Header: "link", NeverTruncateCellValues: true},
+		{Header: "when", MinimumWidth: 16, Wrap: true, KeepWholeTokensWhenTerminalWidthAllows: true, MaximumWrappedLines: 2},
+		{Header: "event", MinimumWidth: 16, Wrap: true, MaximumWrappedLines: 2},
+		{Header: "calendar", MinimumWidth: 8, Wrap: true, MaximumWrappedLines: 2},
 	}
-	return WriteTable(writer, columns, rows)
+	if showCalendarOwnerOrPurposeDescription {
+		columns = append(columns, TableColumn{Header: "owner or purpose", MinimumWidth: 8, Wrap: true, MaximumWrappedLines: 2})
+	}
+	columns = append(columns, TableColumn{Header: "link", NeverTruncateCellValues: true})
+	return writeHumanRecordRowsWithPrimaryContentColumn(writer, columns, rows, 1)
 }
 
 func calendarEventWhen(

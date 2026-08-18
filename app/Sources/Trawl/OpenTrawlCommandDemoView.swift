@@ -7,6 +7,7 @@ struct OpenTrawlCommandDemoView: View {
 
   @State private var playback: OpenTrawlCommandDemoPlayback
 
+  let executableHelpCommand: String
   let onBack: () -> Void
   let onFinish: () -> Void
 
@@ -22,7 +23,11 @@ struct OpenTrawlCommandDemoView: View {
     )
     let outputWidth =
       TrawlDesign.commandDemoPageWidth - TrawlDesign.commandDemoTerminalContentInset * 2
-    let outputColumnCount = Int(outputWidth / outputFont.maximumAdvancement.width)
+    let outputViewportWidth = outputWidth - NSScroller.scrollerWidth(
+      for: .regular,
+      scrollerStyle: NSScroller.preferredScrollerStyle
+    )
+    let outputColumnCount = Int(outputViewportWidth / outputFont.maximumAdvancement.width)
     _playback = State(
       initialValue: OpenTrawlCommandDemoPlayback(
         commandRunner: PackagedOpenTrawlCommandRunner(
@@ -36,16 +41,19 @@ struct OpenTrawlCommandDemoView: View {
         outputPresentation: Self.outputPresentation
       )
     )
+    executableHelpCommand = Self.executableHelpCommand(helperURL: helperURL)
     self.onBack = onBack
     self.onFinish = onFinish
   }
 
   init(
     playback: OpenTrawlCommandDemoPlayback,
+    helperURL: URL,
     onBack: @escaping () -> Void,
     onFinish: @escaping () -> Void
   ) {
     _playback = State(initialValue: playback)
+    executableHelpCommand = Self.executableHelpCommand(helperURL: helperURL)
     self.onBack = onBack
     self.onFinish = onFinish
   }
@@ -64,6 +72,7 @@ struct OpenTrawlCommandDemoView: View {
       )
     } actions: {
       OpenTrawlCommandDemoActions(
+        executableHelpCommand: executableHelpCommand,
         onBack: {
           Task {
             await playback.stop()
@@ -84,6 +93,10 @@ struct OpenTrawlCommandDemoView: View {
     .onDisappear {
       Task { await playback.stop() }
     }
+  }
+
+  private static func executableHelpCommand(helperURL: URL) -> String {
+    TrawlTerminalHandoff.executableHelpCommand(helperURL: helperURL)
   }
 }
 
@@ -120,7 +133,7 @@ private struct OpenTrawlCommandDemoTerminal: View {
         .strokeBorder(Color.white.opacity(0.09))
     }
     .accessibilityElement(children: .contain)
-    .accessibilityLabel(DraftCopy.CommandDemo.terminalTitle)
+    .accessibilityLabel(OperationalCopy.CommandDemo.terminalTitle)
   }
 }
 
@@ -133,7 +146,7 @@ private struct OpenTrawlCommandDemoTerminalHeader: View {
       Circle().fill(Color.yellow.opacity(0.9)).frame(width: 10, height: 10)
       Circle().fill(Color.green.opacity(0.9)).frame(width: 10, height: 10)
       Spacer()
-      Text(DraftCopy.CommandDemo.terminalTitle)
+      Text(OperationalCopy.CommandDemo.terminalTitle)
         .font(.system(.caption, design: .monospaced))
         .foregroundStyle(.white.opacity(0.54))
       Spacer()
@@ -178,6 +191,14 @@ private struct OpenTrawlCommandDemoOutputViewport: NSViewRepresentable {
   let output: String
   let followsOutput: Bool
 
+  final class Coordinator {
+    var wasFollowingOutput = false
+  }
+
+  func makeCoordinator() -> Coordinator {
+    Coordinator()
+  }
+
   func makeNSView(context _: Context) -> NSScrollView {
     let scrollView = NSScrollView()
     scrollView.drawsBackground = false
@@ -211,27 +232,48 @@ private struct OpenTrawlCommandDemoOutputViewport: NSViewRepresentable {
     return scrollView
   }
 
-  func updateNSView(_ scrollView: NSScrollView, context _: Context) {
+  func updateNSView(_ scrollView: NSScrollView, context: Context) {
     guard let textView = scrollView.documentView as? NSTextView else { return }
-    guard textView.string != output else { return }
-    textView.string = output
-    if followsOutput {
-      textView.scrollToEndOfDocument(nil)
+    let outputChanged = textView.string != output
+    if outputChanged {
+      textView.string = output
     }
+    if followsOutput, outputChanged {
+      textView.scrollToEndOfDocument(nil)
+    } else if context.coordinator.wasFollowingOutput, !followsOutput {
+      textView.scrollToBeginningOfDocument(nil)
+    }
+    context.coordinator.wasFollowingOutput = followsOutput
   }
 }
 
 private struct OpenTrawlCommandDemoActions: View {
+  let executableHelpCommand: String
   let onBack: () -> Void
   let onFinish: () -> Void
 
+  @State private var hasCopiedExecutableHelpCommand = false
+
   var body: some View {
     HStack(spacing: 14) {
-      Button(OperationalCopy.SharedAction.back, action: onBack)
+      Button(HumanCopy.SharedAction.back, action: onBack)
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
       Spacer()
-      Button(DraftCopy.CommandDemo.finishAction, action: onFinish)
+      Button {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(executableHelpCommand, forType: .string)
+        hasCopiedExecutableHelpCommand = true
+      } label: {
+        Label(
+          hasCopiedExecutableHelpCommand
+            ? OperationalCopy.CommandDemo.copiedCommand
+            : OperationalCopy.CommandDemo.copyCommand,
+          systemImage: "doc.on.doc"
+        )
+      }
+      .disabled(hasCopiedExecutableHelpCommand)
+      Button(HumanCopy.ArchiveBuild.startSearchingAction, action: onFinish)
         .buttonStyle(.borderedProminent)
     }
   }

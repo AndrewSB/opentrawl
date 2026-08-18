@@ -18,6 +18,7 @@ type calendarEventRecordValuesFromArchive struct {
 	eventDisplayName                      string
 	calendarDisplayName                   string
 	calendarAccountDisplayName            string
+	calendarOwnerOrPurposeAnnotation      *archive.CalendarOwnerOrPurposeAnnotation
 	availability                          *int64
 	location                              *archive.Location
 	organizer                             archive.Person
@@ -45,6 +46,8 @@ func calendarEventRecordValuesFromListItem(
 		allDay:                                archiveEvent.AllDay,
 		eventDisplayName:                      archiveEvent.Title,
 		calendarDisplayName:                   archiveEvent.Calendar,
+		calendarAccountDisplayName:            archiveEvent.Account,
+		calendarOwnerOrPurposeAnnotation:      archiveEvent.CalendarOwnerOrPurposeAnnotation,
 		location:                              archiveEvent.Location,
 		organizer:                             archiveEvent.Organizer,
 		attendees:                             attendeesWithoutCurrentUser,
@@ -62,6 +65,7 @@ func calendarEventRecordValuesFromDetail(
 		eventDisplayName:                      archiveEvent.Title,
 		calendarDisplayName:                   archiveEvent.Calendar,
 		calendarAccountDisplayName:            archiveEvent.Account,
+		calendarOwnerOrPurposeAnnotation:      archiveEvent.CalendarOwnerOrPurposeAnnotation,
 		availability:                          archiveEvent.Availability,
 		location:                              archiveEvent.Location,
 		organizer:                             archiveEvent.Organizer,
@@ -78,12 +82,15 @@ func projectCalendarEventRecord(
 	values calendarEventRecordValuesFromArchive,
 ) *calendarevent.CalendarEventRecord {
 	record := &calendarevent.CalendarEventRecord{
-		CanonicalRecordReference:            trawlkit.NewCanonicalArchiveRecordReference(values.canonicalCalendarEventRecordReference),
-		CalendarEventStartTime:              calendarEventStartTimeForDisplay(values.startTime, values.allDay),
-		CalendarEventEndTime:                calendarEventEndTimeForDisplay(values.startTime, values.endTime, values.allDay),
-		CalendarEventDisplayName:            calendarEventDisplayName(values.eventDisplayName),
-		CalendarDisplayName:                 strings.TrimSpace(values.calendarDisplayName),
-		CalendarAccountDisplayName:          strings.TrimSpace(values.calendarAccountDisplayName),
+		CanonicalRecordReference:   trawlkit.NewCanonicalArchiveRecordReference(values.canonicalCalendarEventRecordReference),
+		CalendarEventStartTime:     calendarEventStartTimeForDisplay(values.startTime, values.allDay),
+		CalendarEventEndTime:       calendarEventEndTimeForDisplay(values.startTime, values.endTime, values.allDay),
+		CalendarEventDisplayName:   calendarEventDisplayName(values.eventDisplayName),
+		CalendarDisplayName:        strings.TrimSpace(values.calendarDisplayName),
+		CalendarAccountDisplayName: strings.TrimSpace(values.calendarAccountDisplayName),
+		CalendarOwnerOrPurposeAnnotation: calendarOwnerOrPurposeAnnotationForProduct(
+			values.calendarOwnerOrPurposeAnnotation,
+		),
 		CalendarEventAvailability:           calendarEventAvailability(values.availability),
 		CalendarEventLocation:               calendarEventLocation(values.location),
 		CalendarEventOrganizer:              calendarEventOrganizer(values.organizer),
