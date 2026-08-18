@@ -16,6 +16,7 @@ import (
 
 	"github.com/opentrawl/opentrawl/trawlkit"
 	ckoutput "github.com/opentrawl/opentrawl/trawlkit/output"
+	"github.com/opentrawl/opentrawl/trawlkit/store"
 )
 
 const (
@@ -188,7 +189,13 @@ func (a archiveReplicator) replicate(
 	if output, err := a.commands.Run(ctx, "ssh", append([]string{"--", destination.host, "mkdir", "-p", "--"}, remoteDirs...)...); err != nil {
 		return nil, replicationCommandError("prepare remote state root", output, err)
 	}
-	if output, err := a.commands.Run(ctx, "ssh", append([]string{"--", destination.host, "chmod", "700", "--"}, remoteDirs...)...); err != nil {
+	// 750, not 700. The replica holds the same personal data as the Mac and
+	// must never be readable by the world, but a replica that grants a reader
+	// access through a POSIX ACL keeps that grant in the group bits: they are
+	// the ACL mask, so 700 would clamp every entry the host granted down to
+	// nothing on every run. 750 is the widest a reader of this tree is ever
+	// allowed — enter and list, never write — and "other" still gets nothing.
+	if output, err := a.commands.Run(ctx, "ssh", append([]string{"--", destination.host, "chmod", "750", "--"}, remoteDirs...)...); err != nil {
 		return nil, replicationCommandError("protect remote state root", output, err)
 	}
 	replicated := make([]string, 0, len(archives))
@@ -212,7 +219,12 @@ func (a archiveReplicator) replicate(
 		if output, err := a.commands.Run(ctx, "sqlite3_rsync", archive.local, destination.host+":"+archive.remote); err != nil {
 			return nil, replicationCommandError("replicate "+archive.name, output, err)
 		}
-		if output, err := a.commands.Run(ctx, "ssh", "--", destination.host, "chmod", "600", "--", archive.remote); err != nil {
+		// 640 for the same reason the state root is 750: on a replica that
+		// grants its reader an ACL, the group bits are the mask. Read is the
+		// most an archive replica ever owes anyone but root, so that is what
+		// the mask is set to — a reader may open the archive, and nothing on
+		// this host may write it.
+		if output, err := a.commands.Run(ctx, "ssh", "--", destination.host, "chmod", "640", "--", archive.remote); err != nil {
 			return nil, replicationCommandError("protect the "+archive.name+" replica", output, err)
 		}
 		// A replica that arrived corrupt is worse than no replica, because it
@@ -237,9 +249,50 @@ func (a archiveReplicator) replicate(
 				message: "The " + archive.name + " replica failed SQLite integrity validation. The previous replica is kept; inspect the replica host storage and retry.",
 			}
 		}
+		if output, err := a.commands.Run(ctx, "ssh", "--", destination.host, sidecarPermissionCommand(archive.remote)); err != nil {
+			return nil, replicationCommandError("open the "+archive.name+" replica sidecars to its reader", output, err)
+		}
 		replicated = append(replicated, archive.name)
 	}
 	return replicated, nil
+}
+
+// replicaSidecarSuffixes name the files beside an archive that a reader of the
+// replica has to write even though it only reads the archive: SQLite's
+// write-ahead log and shared-memory index, and the lock that guards the
+// archive's file set.
+var replicaSidecarSuffixes = []string{"-wal", "-shm", store.TrawlerArchiveFileSetLockSuffix}
+
+// sidecarPermissionCommand gives the sidecars group rw, and leaves the archive
+// itself at the 640 it was given above.
+//
+// Reading a WAL database is a writing act: the reader extends the -wal, maps
+// the -shm and takes the file-set lock. Where the replica grants that reader
+// access through a POSIX ACL, a file's group bits are its ACL mask, so a
+// sidecar that this run created 0600 clamps a user:reader:rw- entry down to an
+// effective r-- and the reader cannot open the archive at all until someone
+// repairs the mask by hand. Group rw is what makes the mask land right the
+// first time. The archive itself stays at 640, a mask of r--: a reader may
+// open the archive, and nothing on this host may write it.
+//
+// A sidecar exists only while the replica is mid-WAL and the lock file only
+// once the replica's reader has run, so a missing one is ordinary rather than
+// a failure, and the command skips it. A chmod that genuinely fails still
+// fails the run.
+//
+// The whole thing goes over as a single argument: ssh joins its arguments with
+// spaces and hands the remote shell one string to re-split, so a command built
+// as argv would arrive taken apart. The paths need no quoting of their own —
+// validRemotePath restricts them to alphanumerics plus "/._-" — but they are
+// quoted anyway, because the shell that reads this is not the one that
+// validated them.
+func sidecarPermissionCommand(remoteArchive string) string {
+	sidecars := make([]string, 0, len(replicaSidecarSuffixes))
+	for _, suffix := range replicaSidecarSuffixes {
+		sidecars = append(sidecars, remoteArchive+suffix)
+	}
+	return "for sidecar in " + strings.Join(sidecars, " ") +
+		"; do if [ -e \"$sidecar\" ]; then chmod 660 -- \"$sidecar\"; fi; done"
 }
 
 // plan resolves every archive before copying any of them, so a trawler with an
