@@ -255,18 +255,90 @@ func TestReplicateCopiesValidatesAndProtectsEachArchive(t *testing.T) {
 	if !runner.ran("sqlite3_rsync", "host:/srv/replica/whatsapp/whatsapp.db") {
 		t.Fatal("the whatsapp archive was not copied to its place under the replica state root")
 	}
-	// The replica holds the same personal data as the Mac. It must not be
-	// left group- or world-readable on a shared host.
-	if !runner.ran("ssh", "chmod 700") {
+	// The replica holds the same personal data as the Mac. It must never be
+	// left world-readable on a shared host. The group bits are deliberate
+	// rather than lax: on a replica that grants a reader access through a
+	// POSIX ACL they are the ACL mask, and clamping them to nothing on every
+	// run is what leaves the reader locked out of a replica it was granted.
+	if !runner.ran("ssh", "chmod 750") {
 		t.Fatal("the replica state root was not protected")
 	}
-	if !runner.ran("ssh", "chmod 600 -- /srv/replica/whatsapp/whatsapp.db") {
+	if !runner.ran("ssh", "chmod 640 -- /srv/replica/whatsapp/whatsapp.db") {
 		t.Fatal("the whatsapp replica was not protected")
 	}
 	if !runner.ran("ssh", "PRAGMA quick_check;") {
 		t.Fatal("the replica was not validated")
 	}
 	assertValidationIsOneRemoteArgument(t, runner)
+}
+
+// Reading a WAL database is a writing act, so the replica's reader writes the
+// sidecars beside an archive it only reads. Where that access is granted by a
+// POSIX ACL, a file's group bits are its ACL mask: sidecars left at 600 clamp
+// a user:reader:rw- entry to an effective r-- and the reader cannot open the
+// archive at all. The archive itself must stay 600 all the same.
+func TestReplicaSidecarsAreOpenedToTheReplicaReader(t *testing.T) {
+	runner := &fakeReplicationRunner{}
+	replicator, trawlers := replicatorOverStateRoot(t, runner, "imessage")
+	destination, err := parseReplicationDestination("host:/srv/replica")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archives, remoteDirs, err := replicator.plan(destination, trawlers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := replicator.replicate(context.Background(), destination, archives, remoteDirs); err != nil {
+		t.Fatal(err)
+	}
+	if !runner.ran("ssh", "chmod 660") {
+		t.Fatal("nothing beside the replica was opened to the replica reader")
+	}
+	for _, suffix := range []string{"-wal", "-shm", ".archive-file-set.lock"} {
+		if !runner.ran("ssh", "/srv/replica/imessage/imessage.db"+suffix) {
+			t.Fatalf("the %s sidecar was not opened to the replica reader", suffix)
+		}
+	}
+	// Group write on the archive would be a mask that lets the replica reader
+	// write the archive itself, which it must never do.
+	if strings.Contains(sidecarPermissionCommand("/srv/replica/imessage/imessage.db"), "imessage.db ") {
+		t.Fatal("the archive itself was named among the sidecars")
+	}
+	if !runner.ran("ssh", "chmod 640 -- /srv/replica/imessage/imessage.db") {
+		t.Fatal("the archive itself was not kept read-only for the replica reader")
+	}
+	// The sidecars are named in one argument, because ssh joins its arguments
+	// with spaces and the remote shell re-splits them.
+	assertSidecarCommandIsOneRemoteArgument(t, runner)
+}
+
+func assertSidecarCommandIsOneRemoteArgument(t *testing.T, runner *fakeReplicationRunner) {
+	t.Helper()
+	for _, command := range runner.commands {
+		if command.name != "ssh" {
+			continue
+		}
+		for _, arg := range command.args {
+			if !strings.Contains(arg, "chmod 660") {
+				continue
+			}
+			if !strings.HasPrefix(arg, "for sidecar in ") || !strings.HasSuffix(arg, "done") {
+				t.Fatalf("the sidecar command reaches the replica shell split apart: %q", arg)
+			}
+			return
+		}
+	}
+	t.Fatal("no sidecar command was run")
+}
+
+// A sidecar exists only while the replica is mid-WAL, and the lock file only
+// once the replica's reader has run, so the command has to skip what is not
+// there rather than fail the replication over it.
+func TestSidecarPermissionCommandSkipsWhatIsNotThere(t *testing.T) {
+	command := sidecarPermissionCommand("/srv/replica/imessage/imessage.db")
+	if !strings.Contains(command, "if [ -e \"$sidecar\" ]; then") {
+		t.Fatalf("a missing sidecar would fail the replication: %q", command)
+	}
 }
 
 // assertValidationIsOneRemoteArgument pins the boundary ssh does not keep. ssh
