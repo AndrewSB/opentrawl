@@ -8,6 +8,8 @@ select
   coalesce(m.is_from_me, 0),
   coalesce(m.text, ''),
   coalesce(m.attributedBody, x''),
+  coalesce(m.balloon_bundle_id, ''),
+  coalesce(m.payload_data, x''),
   case
     when exists(
       select 1
