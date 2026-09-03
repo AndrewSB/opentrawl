@@ -49,6 +49,8 @@ create table if not exists messages (
   associated_message_type integer
 );
 
+` + appleCashMessagesSchema + `
+
 create virtual table if not exists messages_fts using fts5(source_rowid unindexed, text);
 
 create table if not exists contact_mappings (
@@ -69,3 +71,38 @@ create index if not exists idx_chat_messages_chat on chat_messages(chat_rowid, m
 create index if not exists idx_chat_messages_message on chat_messages(message_rowid, chat_rowid);
 create index if not exists idx_messages_date on messages(date, source_rowid);
 `
+
+const appleCashMessagesSchema = `create table if not exists apple_cash_messages (
+  message_rowid integer primary key,
+  version integer not null,
+  identifier text not null,
+  payment_kind integer not null,
+  currency_code text not null,
+  legacy_amount integer not null,
+  sender_address text not null,
+  recipient_address text not null,
+  request_token text not null,
+  payment_identifier text not null,
+  transaction_identifier text not null,
+  memo text not null,
+  request_device_score_identifier text not null,
+  payment_source integer not null,
+  recurring_payment_identifier text not null,
+  recurring_payment_emoji text not null,
+  recurring_payment_color text not null,
+  recurring_payment_start_date real not null,
+  recurring_payment_frequency text not null,
+  has_decimal_amount integer not null,
+  decimal_version integer not null,
+  decimal_exponent integer not null,
+  decimal_length integer not null,
+  decimal_is_negative integer not null,
+  decimal_is_compact integer not null,
+  decimal_reserved integer not null,
+  decimal_mantissa blob not null,
+  local_data blob not null,
+  messages_context integer not null,
+  payment_signature text not null,
+  messages_group_identifier text not null,
+  source_display_text text not null
+);`

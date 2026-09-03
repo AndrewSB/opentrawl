@@ -5,6 +5,7 @@ go 1.26.4
 require (
 	github.com/opentrawl/opentrawl/trawlkit v0.12.3-0.20260619102715-6e14735bb248
 	google.golang.org/protobuf v1.36.11
+	howett.net/plist v1.0.1
 	modernc.org/sqlite v1.53.0
 )
 
