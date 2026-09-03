@@ -16,6 +16,9 @@ to Messages.
 
 The archive is `~/.opentrawl/imessage/imessage.db`. It contains private message
 text, participants, chat metadata and attachment references. Keep it local.
+Apple Cash messages include their source display text and memo in message search
+and open output. Their typed payment, request, recurring-payment and transaction
+fields remain in the source-native iMessage archive and are not searchable.
 
 ## Commands
 

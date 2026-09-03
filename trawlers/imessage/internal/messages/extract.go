@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"time"
 )
@@ -57,6 +58,7 @@ type Message struct {
 	Account        string
 	IsFromMe       bool
 	Text           string
+	AppleCash      *AppleCashMessage
 	HasAttachments bool
 	// IsRead is Apple's is_read flag. It is meaningful only for received
 	// messages (IsFromMe == false), where true means the owner has read it.
@@ -211,6 +213,8 @@ func extractMessages(ctx context.Context, db *sql.DB) ([]Message, error) {
 		var hasAttachments int
 		var isRead int
 		var attributedBody []byte
+		var balloonBundleID string
+		var payloadData []byte
 		if err := rows.Scan(
 			&m.SourceRowID,
 			&m.GUID,
@@ -221,6 +225,8 @@ func extractMessages(ctx context.Context, db *sql.DB) ([]Message, error) {
 			&fromMe,
 			&m.Text,
 			&attributedBody,
+			&balloonBundleID,
+			&payloadData,
 			&hasAttachments,
 			&isRead,
 			&m.IsForward,
@@ -233,6 +239,10 @@ func extractMessages(ctx context.Context, db *sql.DB) ([]Message, error) {
 		}
 		if m.Text == "" {
 			m.Text = decodeAttributedBody(attributedBody)
+		}
+		m.AppleCash, err = decodeAppleCashMessage(balloonBundleID, payloadData)
+		if err != nil {
+			return nil, fmt.Errorf("decode Apple Cash message row %d: %w", m.SourceRowID, err)
 		}
 		m.IsFromMe = fromMe != 0
 		m.HasAttachments = hasAttachments != 0
