@@ -70,6 +70,9 @@ var insertChatMessagesSQL string
 //go:embed queries/update/insert_messages.sql
 var insertMessagesSQL string
 
+//go:embed queries/update/insert_apple_cash_messages.sql
+var insertAppleCashMessagesSQL string
+
 //go:embed queries/update/insert_messages_fts.sql
 var insertMessagesFTSSQL string
 
