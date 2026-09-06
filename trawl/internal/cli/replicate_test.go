@@ -263,7 +263,7 @@ func TestReplicateCopiesValidatesAndProtectsEachArchive(t *testing.T) {
 	if !runner.ran("ssh", "chmod 750") {
 		t.Fatal("the replica state root was not protected")
 	}
-	if !runner.ran("ssh", "chmod 640 -- /srv/replica/whatsapp/whatsapp.db") {
+	if !runner.ran("ssh", "chmod 660 -- /srv/replica/whatsapp/whatsapp.db") {
 		t.Fatal("the whatsapp replica was not protected")
 	}
 	if !runner.ran("ssh", "PRAGMA quick_check;") {
@@ -276,7 +276,10 @@ func TestReplicateCopiesValidatesAndProtectsEachArchive(t *testing.T) {
 // sidecars beside an archive it only reads. Where that access is granted by a
 // POSIX ACL, a file's group bits are its ACL mask: sidecars left at 600 clamp
 // a user:reader:rw- entry to an effective r-- and the reader cannot open the
-// archive at all. The archive itself must stay 600 all the same.
+// archive at all. The archive itself carries the same group rw: SQLite fchmods
+// a zero-length -wal to the archive's mode on every open by its owner, so a
+// 640 archive would clamp the -wal back to r-- on the very validation run
+// that follows. The reader's own r-- entry is what keeps the archive read-only.
 func TestReplicaSidecarsAreOpenedToTheReplicaReader(t *testing.T) {
 	runner := &fakeReplicationRunner{}
 	replicator, trawlers := replicatorOverStateRoot(t, runner, "imessage")
@@ -299,13 +302,13 @@ func TestReplicaSidecarsAreOpenedToTheReplicaReader(t *testing.T) {
 			t.Fatalf("the %s sidecar was not opened to the replica reader", suffix)
 		}
 	}
-	// Group write on the archive would be a mask that lets the replica reader
-	// write the archive itself, which it must never do.
+	// The archive is not a sidecar: its mode is set once, before validation,
+	// so that the -wal SQLite creates during validation inherits a rw- mask.
 	if strings.Contains(sidecarPermissionCommand("/srv/replica/imessage/imessage.db"), "imessage.db ") {
 		t.Fatal("the archive itself was named among the sidecars")
 	}
-	if !runner.ran("ssh", "chmod 640 -- /srv/replica/imessage/imessage.db") {
-		t.Fatal("the archive itself was not kept read-only for the replica reader")
+	if !runner.ran("ssh", "chmod 660 -- /srv/replica/imessage/imessage.db") {
+		t.Fatal("the archive was not given the mode its -wal inherits")
 	}
 	// The sidecars are named in one argument, because ssh joins its arguments
 	// with spaces and the remote shell re-splits them.
