@@ -108,6 +108,7 @@ func trawlHelpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 	commandRows := formatRowsForOutputWidth([][2]string{
 		{"status [<trawler>]", statusCommandHelpDescription},
 		{"update [<trawler> ...]", "Update local archives"},
+		{"replicate --to HOST:/PATH", "Copy archives to a machine you control"},
 		{"search [<words> ...]", "Search local archives"},
 		{"who <name>", "Find a person"},
 		{"conversations", "List conversations"},
@@ -238,7 +239,7 @@ func commandName(args []string) string {
 			continue
 		}
 		switch arg {
-		case "status", "update", "search", "who", "conversations", "messages", "open":
+		case "status", "update", "replicate", "search", "who", "conversations", "messages", "open":
 			return arg
 		}
 	}
