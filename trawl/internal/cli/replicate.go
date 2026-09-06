@@ -219,12 +219,15 @@ func (a archiveReplicator) replicate(
 		if output, err := a.commands.Run(ctx, "sqlite3_rsync", archive.local, destination.host+":"+archive.remote); err != nil {
 			return nil, replicationCommandError("replicate "+archive.name, output, err)
 		}
-		// 640 for the same reason the state root is 750: on a replica that
-		// grants its reader an ACL, the group bits are the mask. Read is the
-		// most an archive replica ever owes anyone but root, so that is what
-		// the mask is set to — a reader may open the archive, and nothing on
-		// this host may write it.
-		if output, err := a.commands.Run(ctx, "ssh", "--", destination.host, "chmod", "640", "--", archive.remote); err != nil {
+		// 660 rather than 640: on a replica that grants its reader an ACL the
+		// group bits are the mask, and SQLite fchmods a zero-length -wal to the
+		// archive's own mode on every open by the file's owner, so a 640
+		// archive snapped the -wal's mask back to r-- each time root ran the
+		// quick_check below and undid the 660 the sidecars are given after it.
+		// Group and other grant nothing on the replica, so 660 widens nothing
+		// by itself: the archive's user:reader:r-- entry keeps the reader
+		// read-only, and the -wal now inherits a rw- mask from the archive.
+		if output, err := a.commands.Run(ctx, "ssh", "--", destination.host, "chmod", "660", "--", archive.remote); err != nil {
 			return nil, replicationCommandError("protect the "+archive.name+" replica", output, err)
 		}
 		// A replica that arrived corrupt is worse than no replica, because it
@@ -264,7 +267,7 @@ func (a archiveReplicator) replicate(
 var replicaSidecarSuffixes = []string{"-wal", "-shm", store.TrawlerArchiveFileSetLockSuffix}
 
 // sidecarPermissionCommand gives the sidecars group rw, and leaves the archive
-// itself at the 640 it was given above.
+// itself at the 660 it was given above.
 //
 // Reading a WAL database is a writing act: the reader extends the -wal, maps
 // the -shm and takes the file-set lock. Where the replica grants that reader
@@ -272,8 +275,12 @@ var replicaSidecarSuffixes = []string{"-wal", "-shm", store.TrawlerArchiveFileSe
 // sidecar that this run created 0600 clamps a user:reader:rw- entry down to an
 // effective r-- and the reader cannot open the archive at all until someone
 // repairs the mask by hand. Group rw is what makes the mask land right the
-// first time. The archive itself stays at 640, a mask of r--: a reader may
-// open the archive, and nothing on this host may write it.
+// first time. SQLite already re-fchmods a zero-length -wal to the archive's
+// mode on every open by its owner, so with the archive at 660 the -wal and
+// -shm land at rw- on their own; this command still covers the lock file,
+// which SQLite never touches, and hosts that grant nothing through an ACL.
+// The archive is not named here: 660 on it is a ceiling, and the reader's own
+// user:reader:r-- entry is what keeps the archive read-only to it.
 //
 // A sidecar exists only while the replica is mid-WAL and the lock file only
 // once the replica's reader has run, so a missing one is ordinary rather than
