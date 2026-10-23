@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -15,7 +14,7 @@ import (
 	"time"
 
 	"github.com/opentrawl/opentrawl/trawlkit"
-	ckoutput "github.com/opentrawl/opentrawl/trawlkit/output"
+	"github.com/opentrawl/opentrawl/trawlkit/render"
 	"github.com/opentrawl/opentrawl/trawlkit/store"
 )
 
@@ -32,15 +31,15 @@ const (
 )
 
 type ReplicateCmd struct {
-	Destination string        `name:"to" required:"" help:"Replica state root as USER@HOST:/absolute/path"`
-	Timeout     time.Duration `name:"timeout" default:"10m" help:"Maximum time for the complete replication"`
+	Destination string        `name:"to" required:"" placeholder:"USER@HOST:/PATH" help:"Replica state root as USER@HOST:/absolute/path"`
+	Timeout     time.Duration `name:"timeout" default:"10m" placeholder:"DURATION" help:"Maximum time for the complete replication"`
 	Args        []string      `arg:"" optional:"" name:"trawler" help:"Trawler names; all installed trawlers when omitted"`
 }
 
 func (c *ReplicateCmd) Run(r *Runtime) error {
 	destination, err := parseReplicationDestination(c.Destination)
 	if err != nil {
-		return usageErr{err}
+		return err
 	}
 	trawlers, err := r.selectedTrawlerArguments(c.Args)
 	if err != nil {
@@ -48,8 +47,7 @@ func (c *ReplicateCmd) Run(r *Runtime) error {
 	}
 	trawlers = canonicalUpdateTrawlers(trawlers)
 	if len(trawlers) == 0 {
-		_, err := fmt.Fprintln(r.stdout, "No trawlers found.")
-		return err
+		return render.NoTrawlersAreAvailable()
 	}
 
 	timeout := c.Timeout
@@ -70,17 +68,14 @@ func (c *ReplicateCmd) Run(r *Runtime) error {
 	replicator := archiveReplicator{
 		commands: r.replicationCommandRunner(),
 		locate:   r.trawlerExecutor().ResolveTrawlerArchiveLocation,
-		stderr:   r.lockedStderr(),
+		output:   r.output,
 	}
 	archives, remoteDirs, err := replicator.plan(destination, trawlers)
 	if err != nil {
 		return err
 	}
 	if len(archives) == 0 {
-		return replicationError{
-			code:    "no_archives",
-			message: "None of the selected trawlers has an archive to replicate. Run update first.",
-		}
+		return render.NoSelectedTrawlerHasArchiveToReplicate()
 	}
 	if err := replicator.preflight(ctx, destination, archives); err != nil {
 		return err
@@ -89,13 +84,7 @@ func (c *ReplicateCmd) Run(r *Runtime) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(
-		r.stdout,
-		"Replicated %s to %s.\n",
-		strings.Join(replicated, ", "),
-		destination.String(),
-	)
-	return err
+	return r.output.WriteArchiveReplication(replicated, destination.String())
 }
 
 type replicationDestination struct {
@@ -112,10 +101,10 @@ func (d replicationDestination) String() string { return d.host + ":" + d.root }
 func parseReplicationDestination(value string) (replicationDestination, error) {
 	host, root, found := strings.Cut(strings.TrimSpace(value), ":")
 	if !found || !validSSHHost(host) {
-		return replicationDestination{}, errors.New("--to must be USER@HOST:/absolute/path using a simple SSH host or alias")
+		return replicationDestination{}, render.ReplicaDestinationMustBeHostAndAbsolutePath()
 	}
 	if root == "/" || !strings.HasPrefix(root, "/") || path.Clean(root) != root || !validRemotePath(root) {
-		return replicationDestination{}, errors.New("--to requires a safe absolute remote state-root path, not / itself")
+		return replicationDestination{}, render.ReplicaDestinationMustBeHostAndAbsolutePath()
 	}
 	return replicationDestination{host: host, root: root}, nil
 }
@@ -149,7 +138,7 @@ func onlyContainsRunes(value, extra string) bool {
 type archiveReplicator struct {
 	commands replicationCommandRunner
 	locate   func(trawlkit.Trawler) (trawlkit.ResolvedTrawlerArchiveLocation, error)
-	stderr   io.Writer
+	output   render.TrawlCommandOutput
 }
 
 // preflight fails before anything is copied. A replication that dies halfway
@@ -162,19 +151,13 @@ func (a archiveReplicator) preflight(ctx context.Context, destination replicatio
 	}
 	for _, executable := range required {
 		if _, err := a.commands.LookPath(executable); err != nil {
-			return replicationError{
-				code:    "dependency_missing",
-				message: executable + " is required for replication. Install it on this Mac and retry.",
-			}
+			return render.ReplicationNeedsProgramOnThisComputer(executable)
 		}
 	}
 	remoteRequired := []string{"sqlite3_rsync", "sqlite3"}
 	for _, executable := range remoteRequired {
 		if _, err := a.commands.Run(ctx, "ssh", "--", destination.host, "command", "-v", executable); err != nil {
-			return replicationError{
-				code:    "remote_dependency_missing",
-				message: executable + " is not available on the replica host. Install a current SQLite sqlite3 and sqlite3_rsync there and retry.",
-			}
+			return render.ReplicationNeedsProgramOnReplicaHost(executable)
 		}
 	}
 	return nil
@@ -200,7 +183,9 @@ func (a archiveReplicator) replicate(
 	}
 	replicated := make([]string, 0, len(archives))
 	for _, archive := range archives {
-		_, _ = fmt.Fprintf(a.stderr, "%s replicating…\n", archive.name)
+		if err := a.output.WriteArchiveReplicationStarted(archive.name); err != nil {
+			return nil, err
+		}
 		// Attachments first. An archive records attachment paths relative to
 		// its own directory, so a database that arrived before its files would
 		// point at names that are not there yet. Stale remote attachments are
@@ -247,10 +232,7 @@ func (a archiveReplicator) replicate(
 			return nil, replicationCommandError("validate the "+archive.name+" replica", output, err)
 		}
 		if strings.TrimSpace(output) != "ok" {
-			return nil, replicationError{
-				code:    "replica_invalid",
-				message: "The " + archive.name + " replica failed SQLite integrity validation. The previous replica is kept; inspect the replica host storage and retry.",
-			}
+			return nil, render.ReplicaFailedIntegrityCheck(archive.name)
 		}
 		if output, err := a.commands.Run(ctx, "ssh", "--", destination.host, sidecarPermissionCommand(archive.remote)); err != nil {
 			return nil, replicationCommandError("open the "+archive.name+" replica sidecars to its reader", output, err)
@@ -316,17 +298,11 @@ func (a archiveReplicator) plan(
 		}
 		located, err := a.locate(trawler.Trawler)
 		if err != nil {
-			return nil, nil, replicationError{
-				code:    "archive_path_invalid",
-				message: "The " + trawlerHumanName(trawler) + " archive path could not be resolved.",
-			}
+			return nil, nil, render.TrawlerArchiveLocationIsUnknown(trawlerHumanName(trawler))
 		}
 		remoteRelative, err := portableRemoteRelativePath(located)
 		if err != nil {
-			return nil, nil, replicationError{
-				code:    "archive_not_portable",
-				message: "The " + trawlerHumanName(trawler) + " archive is not under the state root, so it has no place in the replica. Move it under OPENTRAWL_STATE_ROOT and retry.",
-			}
+			return nil, nil, render.TrawlerArchiveIsOutsideStateRoot(trawlerHumanName(trawler))
 		}
 		// A trawler that has never been updated has no archive. That is not a
 		// failure: replicate what exists.
@@ -411,10 +387,7 @@ func (execReplicationCommandRunner) Run(ctx context.Context, name string, args .
 	cmd.Stderr = &output
 	if err := cmd.Run(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return output.String(), replicationError{
-				code:    "replication_timeout",
-				message: "Replication timed out. Check the replica host connection and retry with a larger --timeout.",
-			}
+			return output.String(), render.ReplicationTimedOut()
 		}
 		return output.String(), fmt.Errorf("%s: %w", name, err)
 	}
@@ -434,29 +407,36 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 	return original, nil
 }
 
-type replicationError struct {
-	code    string
-	message string
+// replicationStepFailure shows the reader one plain sentence and keeps what
+// the failed program said for the run log.
+type replicationStepFailure struct {
+	replicationStepCommandFailure render.CommandFailure
+	failedProgramReport           string
 }
 
-func (e replicationError) Error() string { return e.message }
-
-func (e replicationError) ErrorDescription() ckoutput.ErrorDescription {
-	return ckoutput.ErrorDescription{Code: e.code, Message: e.message}
+func (failure replicationStepFailure) Error() string {
+	return failure.replicationStepCommandFailure.Error()
 }
 
-func replicationCommandError(action string, output string, err error) error {
-	var typed replicationError
-	if errors.As(err, &typed) {
+func (failure replicationStepFailure) Unwrap() error {
+	return failure.replicationStepCommandFailure
+}
+
+func (failure replicationStepFailure) InternalErrorLogMessage() string {
+	return failure.replicationStepCommandFailure.Error() + " " + failure.failedProgramReport
+}
+
+func replicationCommandError(replicationStep string, output string, err error) error {
+	if _, worded := render.AsCommandFailure(err); worded {
 		return err
 	}
-	message := "Could not " + action + ". Check the SSH connection and the replica host, then retry: " + err.Error()
+	failedProgramReport := err.Error()
 	if detail := commandFailureDetail(output); detail != "" {
-		message += ": " + detail
+		failedProgramReport += ": " + detail
 	}
-	return replicationError{
-		code:    "replication_failed",
-		message: message,
+	return replicationStepFailure{
+		replicationStepCommandFailure: render.ReplicationStepFailed(replicationStep),
+		failedProgramReport:           failedProgramReport,
 	}
 }
 
@@ -499,7 +479,7 @@ func acquireReplicationLock(stateRoot string) (*replicationLock, error) {
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		_ = file.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil, replicationAlreadyRunningError{}
+			return nil, render.ReplicationIsAlreadyRunning()
 		}
 		return nil, fmt.Errorf("lock replicate: %w", err)
 	}
@@ -512,15 +492,4 @@ func (lock *replicationLock) Close() error {
 	}
 	_ = syscall.Flock(int(lock.file.Fd()), syscall.LOCK_UN)
 	return lock.file.Close()
-}
-
-type replicationAlreadyRunningError struct{}
-
-func (replicationAlreadyRunningError) Error() string { return "OpenTrawl is already replicating." }
-
-func (replicationAlreadyRunningError) ErrorDescription() ckoutput.ErrorDescription {
-	return ckoutput.ErrorDescription{
-		Code:    "already_replicating",
-		Message: "OpenTrawl is already replicating.",
-	}
 }
