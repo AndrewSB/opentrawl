@@ -20,6 +20,19 @@ mkdir -p "$bin_dir"
 
 start="${EPOCHREALTIME:-$SECONDS.0}"
 
+# target_buildable reports whether a cmd target has any Go files that apply to
+# this platform. A directory can hold only //go:build darwin sources, which is
+# a target that does not exist here rather than one that fails to build. The
+# find above cannot tell the difference; go list can.
+target_buildable() {
+  local module_dir="$1" name="$2" buildable
+  buildable="$(
+    cd "$module_dir"
+    go list -e -f '{{if or .GoFiles .CgoFiles}}yes{{end}}' "./cmd/$name" 2>/dev/null
+  )"
+  [[ "$buildable" == "yes" ]]
+}
+
 target_count=0
 while IFS= read -r go_mod; do
   module_dir="$(dirname "$go_mod")"
@@ -34,6 +47,9 @@ while IFS= read -r go_mod; do
       continue
     fi
     name="$(basename "$target_dir")"
+    if ! target_buildable "$module_dir" "$name"; then
+      continue
+    fi
     target_count=$((target_count + 1))
   done < <(find "$cmd_dir" -mindepth 1 -maxdepth 1 -type d | sort)
 done < <(git ls-files -- 'go.mod' '*/go.mod' | sort)
@@ -57,6 +73,9 @@ while IFS= read -r go_mod; do
       continue
     fi
     name="$(basename "$target_dir")"
+    if ! target_buildable "$module_dir" "$name"; then
+      continue
+    fi
     output="$bin_dir/$name"
     module_path="${module_dir#./}"
 
