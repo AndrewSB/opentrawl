@@ -13,16 +13,18 @@ import (
 type TrawlerCommand struct {
 	SharedTrawlerOperation                federation.SharedTrawlerOperation
 	TrawlerCommandName                    string
+	TrawlerCommandRunsAtNamespaceRoot     bool
 	TrawlerCommandHelpDescription         string
 	TrawlerCommandPositionalArgumentNames []string
 	RegisterTrawlerCommandFlags           func(fs *flag.FlagSet)
 	TrawlerCommandChangesArchive          bool
 	TrawlerCommandDiscoveryPlacement      TrawlerCommandDiscoveryPlacement
 	// Store declares archive access. TrawlerCommandArchiveAccessDefault keeps the runner default.
-	TrawlerCommandArchiveAccess        TrawlerCommandArchiveAccess
-	TrawlerCommandMaximumExecutionTime time.Duration
-	ExecuteTrawlerCommand              func(ctx context.Context, req *TrawlerCommandExecutionRequest) (*command.TrawlerCommandResponse, error)
-	BuildTrawlerSpecificCommandActions func(response *command.TrawlerCommandResponse) render.TrawlerSpecificCommandActions
+	TrawlerCommandArchiveAccess              TrawlerCommandArchiveAccess
+	TrawlerCommandArchiveAccessWithoutWrites func(positionalArguments []string) (TrawlerCommandArchiveAccess, bool)
+	TrawlerCommandMaximumExecutionTime       time.Duration
+	ExecuteTrawlerCommand                    func(ctx context.Context, req *TrawlerCommandExecutionRequest) (*command.TrawlerCommandResponse, error)
+	BuildTrawlerSpecificCommandActions       func(response *command.TrawlerCommandResponse) render.TrawlerSpecificCommandActions
 }
 
 type TrawlerCommandDiscoveryPlacement int

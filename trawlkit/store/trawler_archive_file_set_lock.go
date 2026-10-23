@@ -11,6 +11,11 @@ import (
 
 var ErrTrawlerArchiveFileSetIsBeingRecreated = errors.New("trawler archive file set is being recreated")
 
+// TrawlerArchiveFileSetLockSuffix names the lock file that guards an archive's
+// file set. It sits beside the archive under a derived name, so anything that
+// copies or repairs an archive's neighbours has to know it too.
+const TrawlerArchiveFileSetLockSuffix = ".archive-file-set.lock"
+
 type TrawlerArchiveFileSetLock struct {
 	file *os.File
 }
@@ -35,7 +40,7 @@ func acquireTrawlerArchiveFileSetLock(trawlerArchivePath string, lockOperation i
 	if err := os.MkdirAll(filepath.Dir(trawlerArchivePath), 0o755); err != nil {
 		return nil, fmt.Errorf("create trawler archive directory: %w", err)
 	}
-	lockFile, err := os.OpenFile(trawlerArchivePath+".archive-file-set.lock", os.O_CREATE|os.O_RDWR, 0o600)
+	lockFile, err := os.OpenFile(trawlerArchivePath+TrawlerArchiveFileSetLockSuffix, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open trawler archive file set lock: %w", err)
 	}

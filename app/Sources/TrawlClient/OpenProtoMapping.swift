@@ -37,6 +37,11 @@ extension Trawl_Open_OpenRecord {
         try calendarEventRecord.decodedCalendarEventRecord(
           canonicalOpenedRecordReference: canonicalOpenedRecordReference,
           registeredTrawler: registeredTrawler))
+    case .calendarRecord(let calendarRecord):
+      openedRecordContent = .calendar(
+        try calendarRecord.decodedCalendarRecord(
+          canonicalOpenedRecordReference: canonicalOpenedRecordReference,
+          registeredTrawler: registeredTrawler))
     case .openedNoteRecord(let openedNoteRecord):
       openedRecordContent = .note(
         try openedNoteRecord.decodedOpenedNoteRecord(
@@ -47,7 +52,8 @@ extension Trawl_Open_OpenRecord {
         try trawlerSpecificOpenedRecordPresentation.decodedTrawlerSpecificOpenedRecordPresentation(
           canonicalOpenedRecordReference: canonicalOpenedRecordReference,
           requestedTrawlLink: requestedTrawlLink))
-    case nil:
+    case .openedPhotoRecord, nil:
+      // The app transport projects Photos through the shared detail presentation.
       throw TrawlClientError.invalidProtobuf
     }
 
@@ -344,6 +350,32 @@ extension Trawl_CalendarEvent_CalendarEventAttendeeAttendanceStatus {
     case .unknown: .unknown
     case .unspecified, .UNRECOGNIZED: nil
     }
+  }
+}
+
+extension Trawl_Calendar_CalendarRecord {
+  fileprivate func decodedCalendarRecord(
+    canonicalOpenedRecordReference: CanonicalArchiveRecordReference,
+    registeredTrawler: RegisteredTrawlerIdentity
+  ) throws -> CalendarRecord {
+    let canonicalCalendarRecordReference =
+      canonicalRecordReference.decodedCanonicalArchiveRecordReference
+    guard
+      canonicalCalendarRecordReference == canonicalOpenedRecordReference,
+      isCanonicalTrawlerRecordReference(
+        canonicalCalendarRecordReference,
+        registeredTrawler: registeredTrawler)
+    else {
+      throw TrawlClientError.invalidProtobuf
+    }
+    return CalendarRecord(
+      canonicalRecordReference: canonicalCalendarRecordReference,
+      calendarDisplayName: calendarDisplayName,
+      calendarAccountDisplayName: calendarAccountDisplayName,
+      calendarOwnerOrPurposeAnnotation:
+        hasCalendarOwnerOrPurposeAnnotation
+        ? try calendarOwnerOrPurposeAnnotation.decodedCalendarOwnerOrPurposeAnnotation() : nil,
+      activeOrFutureCalendarEventCount: activeOrFutureCalendarEventCount)
   }
 }
 
