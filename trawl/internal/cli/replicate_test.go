@@ -10,8 +10,10 @@ import (
 	"testing"
 
 	"github.com/opentrawl/opentrawl/trawlkit"
+	cklog "github.com/opentrawl/opentrawl/trawlkit/log"
 	federation "github.com/opentrawl/opentrawl/trawlkit/proto/trawl/federation"
 	status "github.com/opentrawl/opentrawl/trawlkit/proto/trawl/status"
+	"github.com/opentrawl/opentrawl/trawlkit/render"
 )
 
 // The destination reaches argv of ssh and sqlite3_rsync. Everything that could
@@ -183,7 +185,7 @@ func replicatorOverStateRoot(t *testing.T, runner *fakeReplicationRunner, identi
 		commands: runner,
 		locate: trawlkit.NewTrawlerExecutor(trawlkit.TrawlerExecutorOptions{StateRoot: stateRoot}).
 			ResolveTrawlerArchiveLocation,
-		stderr: io.Discard,
+		output: render.NewTrawlCommandOutput(io.Discard, io.Discard, "trawl"),
 	}
 	return replicator, trawlers
 }
@@ -228,8 +230,7 @@ func TestPreflightRefusesWhenTheReplicaHostLacksSQLite(t *testing.T) {
 	if err == nil {
 		t.Fatal("preflight accepted a replica host without sqlite3")
 	}
-	var typed replicationError
-	if !errors.As(err, &typed) || typed.code != "remote_dependency_missing" {
+	if err.Error() != render.ReplicationNeedsProgramOnReplicaHost("sqlite3").Error() {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -391,8 +392,7 @@ func TestReplicateFailsWhenTheReplicaDoesNotPassIntegrityValidation(t *testing.T
 	if err == nil {
 		t.Fatal("replicate reported success for a corrupt replica")
 	}
-	var typed replicationError
-	if !errors.As(err, &typed) || typed.code != "replica_invalid" {
+	if err.Error() != render.ReplicaFailedIntegrityCheck("whatsapp").Error() {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -447,7 +447,7 @@ func TestReplicationFailureReportsWhatTheCommandSaid(t *testing.T) {
 	if err == nil {
 		t.Fatal("replication reported success after the copy failed")
 	}
-	if !strings.Contains(err.Error(), remoteComplaint) {
+	if !strings.Contains(cklog.InternalErrorLogMessage(err), remoteComplaint) {
 		t.Fatalf("the failure did not say what the command reported: %v", err)
 	}
 }
@@ -483,8 +483,7 @@ func TestReplicationLockIsExclusive(t *testing.T) {
 	if err == nil {
 		t.Fatal("a second replication acquired the lock while the first held it")
 	}
-	var alreadyRunning replicationAlreadyRunningError
-	if !errors.As(err, &alreadyRunning) {
+	if err.Error() != render.ReplicationIsAlreadyRunning().Error() {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if err := first.Close(); err != nil {
