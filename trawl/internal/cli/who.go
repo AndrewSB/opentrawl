@@ -1,14 +1,14 @@
 package cli
 
 import (
-	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/opentrawl/opentrawl/trawl/internal/federation"
 	"github.com/opentrawl/opentrawl/trawlkit"
-	federation "github.com/opentrawl/opentrawl/trawlkit/proto/trawl/federation"
+	federationcontract "github.com/opentrawl/opentrawl/trawlkit/proto/trawl/federation"
 	person "github.com/opentrawl/opentrawl/trawlkit/proto/trawl/person"
 	"github.com/opentrawl/opentrawl/trawlkit/render"
 	"github.com/opentrawl/opentrawl/trawlkit/whomatch"
@@ -33,51 +33,81 @@ type personMatchCandidate struct {
 }
 
 func (c *WhoCmd) Run(r *Runtime) error {
-	query := strings.Join(c.Name, " ")
-	query = strings.Join(strings.Fields(query), " ")
+	query := strings.Join(strings.Fields(strings.Join(c.Name, " ")), " ")
 	if query == "" {
-		return usageErr{humanFacingUsageErrorMessage("Who needs a name.")}
+		return render.WhoNeedsName()
 	}
 	if c.Limit < 1 {
-		return usageErr{humanFacingUsageErrorMessage("--limit must be at least 1.")}
+		return render.LimitMustBeAtLeastOne()
 	}
 
 	installed := discoverInstalledTrawlers(r.ctx)
 	resolution := resolveWhoThroughContacts(r, installed, query)
+	resolution.OperationFailures = append(resolution.OperationFailures,
+		r.readPersonMessageCountsFromTrawlers(installed, resolution.Candidates)...)
 	operation := federatedPersonMatchOperation(resolution, trawlerDisplayNamesByIdentity(installed))
+	r.logFederationOutcomes(operation.GetOperationFailures(), operation.GetTrawlersSkippedFromOperation())
 	numberOfMatchingPeople := len(operation.GetPersonMatchCandidates())
+	if numberOfMatchingPeople == 0 && len(operation.GetOperationFailures()) == 0 {
+		return unknownPersonFailure(query, resolution, trawlerDisplayNamesByIdentity(installed), func(personLink string) []string {
+			return []string{"who", personLink}
+		})
+	}
+	var nextCommandShowingMorePeople []render.NextCommand
 	if numberOfMatchingPeople > c.Limit {
 		operation.PersonMatchCandidates = operation.GetPersonMatchCandidates()[:c.Limit]
+		nextCommandShowingMorePeople = []render.NextCommand{render.NextCommandShowingMoreRows(
+			[]string{"who", query, "--limit", strconv.Itoa(c.Limit * 2)},
+		)}
 	}
-	if numberOfMatchingPeople > 0 {
-		if err := render.WriteFederatedTrawlerPersonMatchOperation(r.stdout, operation); err != nil {
-			return err
-		}
-	} else if len(operation.GetOperationFailures()) == 0 {
-		if err := render.WriteFederatedTrawlerPersonMatchOperation(r.stderr, operation); err != nil {
-			return err
-		}
-	}
-	if numberOfMatchingPeople > c.Limit {
-		moreCommand := fmt.Sprintf(
-			"%s who %s --limit %s",
-			render.TrawlInvocationDisplay(r.stdout),
-			quoteExampleArg(query),
-			strconv.Itoa(c.Limit*2),
-		)
-		moreHint := "More: " + moreCommand
-		if _, err := fmt.Fprintln(r.stdout); err != nil {
-			return err
-		}
-		if err := render.WriteTrawlCommandHint(r.stdout, moreHint); err != nil {
-			return err
-		}
-	}
-	r.reportFederationOutcomes(operation.GetOperationFailures(), operation.GetTrawlersSkippedFromOperation())
-	if len(operation.GetPersonMatchCandidates()) == 0 && len(operation.GetOperationFailures()) == 0 {
-		return exitErr{code: 1}
+	if err := r.output.WritePersonMatches(operation, nextCommandShowingMorePeople); err != nil {
+		return err
 	}
 	return outcomeExit(operation.GetOutcome())
+}
+
+func (r *Runtime) readPersonMessageCountsFromTrawlers(
+	installedTrawlers []InstalledTrawler,
+	candidates []personMatchCandidate,
+) []*federationcontract.TrawlerOperationFailure {
+	var failures []*federationcontract.TrawlerOperationFailure
+	for candidateIndex := range candidates {
+		candidate := &candidates[candidateIndex]
+		for _, installedTrawler := range installedTrawlers {
+			if _, supported := installedTrawler.Trawler.(trawlkit.PersonMessageCounter); !supported {
+				continue
+			}
+			trawlerIdentity := installedTrawlerIdentityText(installedTrawler)
+			facts := personMatchFactsForTrawlerFromFacts(candidate.PersonMatchFactsFromTrawlers, trawlerIdentity)
+			if len(facts.GetExactPersonFilterIdentifiersObservedByTrawlerArchive()) == 0 {
+				continue
+			}
+			messageCount, err := r.trawlerExecutor().CountPersonMessages(r.ctx, installedTrawler.Trawler,
+				&person.ExactPersonMessageCountRequest{ExactPersonFilterIdentifiers: facts.GetExactPersonFilterIdentifiersObservedByTrawlerArchive()})
+			if err != nil {
+				failures = append(failures, federation.FailureForError(installedTrawler.RegisteredTrawlerManifest,
+					federationcontract.SharedTrawlerOperation_SHARED_TRAWLER_OPERATION_WHO, err))
+				continue
+			}
+			currentSourceCounts := make([]*person.PersonMessageCountFromTrawlerArchive, 0, len(candidate.PersonMessageCountsFromTrawlerArchives)+1)
+			for _, previousCount := range candidate.PersonMessageCountsFromTrawlerArchives {
+				if trawlkit.RegisteredTrawlerIdentityText(previousCount.GetRegisteredTrawler()) != trawlerIdentity {
+					currentSourceCounts = append(currentSourceCounts, previousCount)
+				}
+			}
+			candidate.PersonMessageCountsFromTrawlerArchives = append(currentSourceCounts,
+				&person.PersonMessageCountFromTrawlerArchive{
+					RegisteredTrawler: installedTrawler.RegisteredTrawlerManifest.GetRegisteredTrawler(),
+					MessageCountInvolvingPersonInTrawlerArchive: messageCount.GetMessageCountInvolvingPerson(),
+				})
+		}
+		candidate.MessageCountInvolvingPerson = 0
+		for _, messageCount := range candidate.PersonMessageCountsFromTrawlerArchives {
+			candidate.MessageCountInvolvingPerson += int(messageCount.GetMessageCountInvolvingPersonInTrawlerArchive())
+		}
+	}
+	sortWhoCandidates(candidates)
+	return failures
 }
 
 func normalisedStringList(values []string) []string {
@@ -123,25 +153,14 @@ func sortWhoCandidates(candidates []personMatchCandidate) {
 	})
 }
 
-func whoSources(sources []string, surfaces map[string]string) string {
-	if len(sources) == 0 {
-		return ""
-	}
-	named := make([]string, 0, len(sources))
-	for _, source := range sources {
-		named = append(named, firstNonEmpty(surfaces[source], source))
-	}
-	return strings.Join(normalisedStringList(named), ", ")
-}
-
 func federatedPersonMatchOperation(
 	resolution federatedWhoResolution,
 	trawlerDisplayNames map[string]string,
-) *federation.FederatedTrawlerPersonMatchOperation {
-	return &federation.FederatedTrawlerPersonMatchOperation{
+) *federationcontract.FederatedTrawlerPersonMatchOperation {
+	return &federationcontract.FederatedTrawlerPersonMatchOperation{
 		Outcome:                         federatedOperationOutcome(len(resolution.TrawlersConsulted), len(resolution.OperationFailures), 0),
 		PersonMatchCandidates:           federatedPersonMatchCandidates(resolution.Candidates, trawlerDisplayNames),
-		OperationFailures:               append([]*federation.TrawlerOperationFailure(nil), resolution.OperationFailures...),
+		OperationFailures:               append([]*federationcontract.TrawlerOperationFailure(nil), resolution.OperationFailures...),
 		PersonQueryUsedToFindCandidates: resolution.Query,
 	}
 }
@@ -149,8 +168,8 @@ func federatedPersonMatchOperation(
 func federatedPersonMatchCandidates(
 	whoCandidates []personMatchCandidate,
 	trawlerDisplayNames map[string]string,
-) []*federation.FederatedPersonMatchCandidate {
-	candidates := make([]*federation.FederatedPersonMatchCandidate, 0, len(whoCandidates))
+) []*federationcontract.FederatedPersonMatchCandidate {
+	candidates := make([]*federationcontract.FederatedPersonMatchCandidate, 0, len(whoCandidates))
 	for _, candidate := range whoCandidates {
 		candidatePersonMatchFactsFromTrawlers := candidate.PersonMatchFactsFromTrawlers
 		facts := make([]*person.PersonMatchFactsFromTrawler, 0, len(candidatePersonMatchFactsFromTrawlers))
@@ -174,7 +193,7 @@ func federatedPersonMatchCandidates(
 		if candidate.MessageCountInvolvingPerson > 0 {
 			messageCountInvolvingPersonAcrossTrawlers = uint64(candidate.MessageCountInvolvingPerson)
 		}
-		converted := &federation.FederatedPersonMatchCandidate{
+		converted := &federationcontract.FederatedPersonMatchCandidate{
 			PersonDisplayName:                                     candidate.Who,
 			AlternativePersonDisplayNames:                         append([]string(nil), candidate.AlternativeNames...),
 			PersonNameOrHumanReadableContactValueThatMatchedQuery: candidate.PersonNameOrHumanReadableContactValueThatMatchedQuery,

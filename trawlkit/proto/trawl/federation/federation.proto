@@ -6,6 +6,7 @@ import "google/protobuf/timestamp.proto";
 import "trawl/conversation/conversation.proto";
 import "trawl/identity/identity.proto";
 import "trawl/person/person.proto";
+import "trawl/photos/step/photos_step.proto";
 import "trawl/search/search.proto";
 import "trawl/status/status.proto";
 import "trawl/update/update.proto";
@@ -49,6 +50,7 @@ message TrawlerOperationFailure {
   string registered_trawler_display_name = 2;
   FailureCode failure_code = 3;
   string failure_message = 4;
+  repeated trawl.photos.step.PhotosStepName photos_steps_not_built = 5;
 }
 
 message TrawlerSkippedFromOperation {
@@ -93,6 +95,7 @@ message RegisteredTrawlerCommandDeclaration {
   repeated string trawler_command_positional_argument_names = 4;
   repeated RegisteredTrawlerCommandFlagDeclaration trawler_command_flag_declarations = 5;
   RegisteredTrawlerCommandDiscoveryPlacement trawler_command_discovery_placement = 6;
+  bool trawler_command_runs_at_namespace_root = 7;
 }
 
 message RegisteredTrawlerManifest {
@@ -103,6 +106,7 @@ message RegisteredTrawlerManifest {
   repeated string registered_trawler_aliases = 7;
   TrawlerPrivacyBoundary registered_trawler_privacy_boundary = 8;
   repeated RegisteredTrawlerCommandDeclaration registered_trawler_command_declarations = 9;
+  bool search_matches_resolved_person_display_names = 10;
 }
 
 enum RegisteredTrawlerReleaseState {
