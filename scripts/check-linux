@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Linux cannot source data from Apple apps, but it can read an archive
+# replicated from a Mac. That makes Linux a supported read target, and this
+# checks the property that keeps it one: every Go module still builds and vets
+# for Linux.
+#
+# It deliberately does not run the test suites. Several of them need macOS
+# fixtures or app access, and pretending otherwise would either fail the gate
+# for the wrong reason or teach people to ignore it. Compilation is the part
+# that regresses silently — a darwin-only symbol reaching a shared package is
+# invisible on a Mac until someone tries to build elsewhere.
+
+# CGO_ENABLED=0 so this runs from a Mac as well as on Linux: cross-compiling
+# with cgo would need a Linux C toolchain, and then only CI could ever run the
+# gate. Nothing here executes, so the SQLite driver is never called; the parts
+# of the tree that need cgo are behind build tags for exactly this reason.
+export CGO_ENABLED=0
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+modules=()
+while IFS= read -r module; do
+  modules+=("$module")
+done < <(
+  git ls-files |
+    sed -n -e 's#^go\.mod$#.#p' -e 's#/go\.mod$##p' |
+    sort
+)
+
+for module in "${modules[@]}"; do
+  echo "linux: $module"
+  (
+    cd "$root/$module"
+    GOOS=linux go build ./...
+    GOOS=linux go vet ./...
+  )
+done
+
+echo "check-linux: ok"

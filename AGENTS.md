@@ -121,7 +121,7 @@ into a computer janitor.
   Reimplement accepted product logic cleanly.
 - Install the repository hooks with `scripts/install-hooks`. Run
   `scripts/check-clean` before every commit. There is no CI: the pre-push hook
-  runs check-clean, check-lint and check-test on this machine, which takes about
+  runs check-clean, check-lint, check-test and check-linux on this machine, which takes about
   two minutes, and nothing is checked after a push. Push to main directly. Main
   cannot be force pushed or deleted. Do not bypass a check, weaken it,
   add a suppression or change data merely to make it pass. A green check proves
