@@ -23,20 +23,36 @@ type whoNameEvidence struct {
 }
 
 func (s *Store) whoCandidateRecords(ctx context.Context) ([]whoCandidateRecord, error) {
-	return s.readWhoCandidateRecords(ctx)
+	return s.readWhoCandidateRecords(ctx, true)
 }
 
-func (s *Store) readWhoCandidateRecords(ctx context.Context) ([]whoCandidateRecord, error) {
+// whoCandidateNameRecords answers "what is this participant called", which is
+// all the sender display-name map reads. It skips the per-message statistics,
+// which that map never looks at and which cost an order of magnitude more than
+// everything else on the path: they attribute every message to every
+// participant of its group before aggregating.
+//
+// Skipping them admits candidates with no messages. None of those can change a
+// name the map returns: a lookup key comes from a message's own sender, and a
+// candidate reachable by such a key has that message in its statistics by
+// construction, so it is never one of the admitted ones.
+func (s *Store) whoCandidateNameRecords(ctx context.Context) ([]whoCandidateRecord, error) {
+	return s.readWhoCandidateRecords(ctx, false)
+}
+
+func (s *Store) readWhoCandidateRecords(ctx context.Context, withStats bool) ([]whoCandidateRecord, error) {
 	builders, err := s.readWhoCandidateAliases(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.readWhoCandidateStats(ctx, builders); err != nil {
-		return nil, err
+	if withStats {
+		if err := s.readWhoCandidateStats(ctx, builders); err != nil {
+			return nil, err
+		}
 	}
 	records := make([]whoCandidateRecord, 0, len(builders))
 	for _, builder := range builders {
-		if builder.messages == 0 {
+		if withStats && builder.messages == 0 {
 			continue
 		}
 		identifiers := sortedValues(builder.identifiers)

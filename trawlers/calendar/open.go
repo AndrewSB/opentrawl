@@ -7,25 +7,21 @@ import (
 
 	"github.com/opentrawl/opentrawl/calendar/internal/archive"
 	"github.com/opentrawl/opentrawl/trawlkit"
-	"github.com/opentrawl/opentrawl/trawlkit/output"
+	"github.com/opentrawl/opentrawl/trawlkit/render"
 )
 
 func (c *Crawler) loadOpenEvent(
 	ctx context.Context,
 	req *trawlkit.TrawlerCommandExecutionRequest,
-	localShortReference *trawlkit.LocalTrawlerShortReference,
+	canonicalCalendarEventReference *trawlkit.CanonicalArchiveRecordReference,
 ) (archive.EventDetail, error) {
 	st, err := archive.UseExisting(ctx, req.OpenedTrawlerArchiveStore, req.TrawlerArchivePaths.TrawlerArchivePath)
 	if err != nil {
 		return archive.EventDetail{}, archiveErr(fmt.Errorf("open archive: %w", err))
 	}
-	resolved, err := c.resolveOpenRef(ctx, req, localShortReference)
-	if err != nil {
-		return archive.EventDetail{}, err
-	}
-	event, err := st.OpenEvent(ctx, resolved)
+	event, err := st.OpenEvent(ctx, trawlkit.CanonicalArchiveRecordReferenceText(canonicalCalendarEventReference))
 	if errors.Is(err, archive.ErrEventNotFound) {
-		return archive.EventDetail{}, commandErr(1, "not_found", output.HumanFacingErrorMessage("No event has that link."))
+		return archive.EventDetail{}, commandErr(1, "not_found", render.NoArchiveRecordHasLink(render.ArchiveRecordKindNounEvent))
 	}
 	if err != nil {
 		return archive.EventDetail{}, err
@@ -37,19 +33,19 @@ func (c *Crawler) resolveOpenRef(
 	ctx context.Context,
 	req *trawlkit.TrawlerCommandExecutionRequest,
 	localShortReference *trawlkit.LocalTrawlerShortReference,
-) (string, error) {
+) (*trawlkit.CanonicalArchiveRecordReference, error) {
 	if !trawlkit.ValidShortRef(trawlkit.LocalTrawlerShortReferenceText(localShortReference)) {
-		return "", commandErr(1, "unknown_short_ref", output.HumanFacingErrorMessage("No event has that link."))
+		return nil, commandErr(1, "unknown_short_ref", render.NoArchiveRecordHasLink(render.ArchiveRecordKindNounEvent))
 	}
 	matches, err := req.ResolveShortReference(ctx, localShortReference)
 	if errors.Is(err, trawlkit.ErrUnknownShortRef) {
-		return "", commandErr(1, "unknown_short_ref", output.HumanFacingErrorMessage("No event has that link."))
+		return nil, commandErr(1, "unknown_short_ref", render.NoArchiveRecordHasLink(render.ArchiveRecordKindNounEvent))
 	}
 	if errors.Is(err, trawlkit.ErrAmbiguousShortRef) {
-		return "", commandErr(1, "ambiguous_short_ref", output.HumanFacingErrorMessage("More than one event has that link."))
+		return nil, commandErr(1, "ambiguous_short_ref", render.SeveralArchiveRecordsHaveLink(render.ArchiveRecordKindNounEvent))
 	}
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return trawlkit.CanonicalArchiveRecordReferenceText(matches[0]), nil
+	return matches[0], nil
 }
