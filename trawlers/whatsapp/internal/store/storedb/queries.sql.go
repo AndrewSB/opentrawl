@@ -32,6 +32,17 @@ func (q *Queries) CountContacts(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countDuplicateMessageRows = `-- name: CountDuplicateMessageRows :one
+select count(*) - count(distinct msg_id) from messages
+`
+
+func (q *Queries) CountDuplicateMessageRows(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countDuplicateMessageRows)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countGroups = `-- name: CountGroups :one
 select count(*) from groups
 `
@@ -44,7 +55,7 @@ func (q *Queries) CountGroups(ctx context.Context) (int64, error) {
 }
 
 const countMediaMessages = `-- name: CountMediaMessages :one
-select count(*) from messages where media_type <> '' or media_path <> '' or media_url <> ''
+select count(distinct msg_id) from messages where media_type <> '' or media_path <> '' or media_url <> ''
 `
 
 func (q *Queries) CountMediaMessages(ctx context.Context) (int64, error) {
@@ -55,7 +66,7 @@ func (q *Queries) CountMediaMessages(ctx context.Context) (int64, error) {
 }
 
 const countMessages = `-- name: CountMessages :one
-select count(*) from messages
+select count(distinct msg_id) from messages
 `
 
 func (q *Queries) CountMessages(ctx context.Context) (int64, error) {
@@ -423,7 +434,7 @@ select
 	c.jid,
 	c.kind,
 	coalesce(c.name, '') as name,
-	coalesce(c.last_message_at, 0) as last_message_at,
+	cast(coalesce(max(case when m.ts > 0 and m.ts <= 253402300799 then m.ts end), 0) as integer) as last_message_at,
 	c.unread_count,
 	c.archived,
 	c.removed,
@@ -432,8 +443,8 @@ select
 	count(m.rowid) as message_count
 from chats c
 left join messages m on m.chat_jid = c.jid
-group by c.jid, c.kind, c.name, c.last_message_at, c.unread_count, c.archived, c.removed, c.hidden, c.raw_session_type
-order by case when c.last_message_at > 0 and c.last_message_at <= 253402300799 then c.last_message_at else 0 end desc
+group by c.jid, c.kind, c.name, c.unread_count, c.archived, c.removed, c.hidden, c.raw_session_type
+order by last_message_at desc
 limit ?1
 `
 
@@ -489,7 +500,7 @@ select
 	c.jid,
 	c.kind,
 	coalesce(c.name, '') as name,
-	coalesce(c.last_message_at, 0) as last_message_at,
+	cast(coalesce(max(case when m.ts > 0 and m.ts <= 253402300799 then m.ts end), 0) as integer) as last_message_at,
 	c.unread_count,
 	c.archived,
 	c.removed,
@@ -499,8 +510,8 @@ select
 from chats c
 left join messages m on m.chat_jid = c.jid
 where c.unread_count > 0
-group by c.jid, c.kind, c.name, c.last_message_at, c.unread_count, c.archived, c.removed, c.hidden, c.raw_session_type
-order by case when c.last_message_at > 0 and c.last_message_at <= 253402300799 then c.last_message_at else 0 end desc
+group by c.jid, c.kind, c.name, c.unread_count, c.archived, c.removed, c.hidden, c.raw_session_type
+order by last_message_at desc
 limit ?1
 `
 
