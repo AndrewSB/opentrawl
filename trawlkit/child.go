@@ -32,6 +32,14 @@ type childFrame struct {
 	errorDescription       *output.ErrorDescription
 }
 
+type childProcessWaitResult struct {
+	waitError error
+}
+
+type childDecodeErrorResult struct {
+	decodeError error
+}
+
 type childFrameKind int
 
 const (
@@ -347,14 +355,14 @@ func waitForChild(ctx context.Context, cmd *exec.Cmd, stdout io.Reader, stderr f
 		newTimer = newRealWatchdogTimer
 	}
 	frames := make(chan childFrame)
-	decodeErrs := make(chan error, 1)
-	done := make(chan error, 1)
+	childDecodeErrorResults := make(chan childDecodeErrorResult, 1)
+	childProcessWaitResults := make(chan childProcessWaitResult, 1)
 	// StdoutPipe requires every read to finish before Wait closes the pipe. Keep
 	// both operations in one goroutine so a fast child cannot lose its terminal
 	// frame to Wait racing the decoder.
 	go func() {
-		decodeChildFrames(stdout, frames, decodeErrs)
-		done <- cmd.Wait()
+		decodeChildFrames(stdout, frames, childDecodeErrorResults)
+		childProcessWaitResults <- childProcessWaitResult{waitError: cmd.Wait()}
 	}()
 
 	timer := newTimer(watchdog)
@@ -363,10 +371,10 @@ func waitForChild(ctx context.Context, cmd *exec.Cmd, stdout io.Reader, stderr f
 	for {
 		select {
 		case <-ctx.Done():
-			terminateChildAndDrain(cmd, done, frames, decodeErrs, grace)
+			terminateChildAndDrain(cmd, childProcessWaitResults, frames, childDecodeErrorResults, grace)
 			return terminalFailure(terminal, ctx.Err())
 		case <-timer.tick():
-			terminateChildAndDrain(cmd, done, frames, decodeErrs, grace)
+			terminateChildAndDrain(cmd, childProcessWaitResults, frames, childDecodeErrorResults, grace)
 			return terminalFailure(terminal, fmt.Errorf("mutating command made no progress for %s", watchdog))
 		case frame, ok := <-frames:
 			if !ok {
@@ -374,7 +382,7 @@ func waitForChild(ctx context.Context, cmd *exec.Cmd, stdout io.Reader, stderr f
 				continue
 			}
 			if terminal != nil {
-				terminateChildAndDrain(cmd, done, frames, decodeErrs, grace)
+				terminateChildAndDrain(cmd, childProcessWaitResults, frames, childDecodeErrorResults, grace)
 				return terminalFailure(terminal, errors.New("child sent a frame after its terminal result"))
 			}
 			timer.reset(watchdog)
@@ -386,13 +394,13 @@ func waitForChild(ctx context.Context, cmd *exec.Cmd, stdout io.Reader, stderr f
 			case childFrameResult:
 				terminal = &frame
 			}
-		case err := <-decodeErrs:
-			waitErr := waitForChildExit(ctx, cmd, done, watchdog, grace, newTimer)
-			if !errors.Is(err, io.EOF) {
+		case decodeResult := <-childDecodeErrorResults:
+			waitErr := waitForChildExit(ctx, cmd, childProcessWaitResults, watchdog, grace, newTimer)
+			if !errors.Is(decodeResult.decodeError, io.EOF) {
 				if waitErr != nil {
 					return executionResult{err: childExitError(waitErr, stderr())}
 				}
-				return executionResult{err: fmt.Errorf("read child wire: %w", err)}
+				return executionResult{err: fmt.Errorf("read child wire: %w", decodeResult.decodeError)}
 			}
 			if terminal == nil {
 				if waitErr != nil {
@@ -457,7 +465,7 @@ func childProcessExitCode(err error) int {
 	return 1
 }
 
-func waitForChildExit(ctx context.Context, cmd *exec.Cmd, done <-chan error, watchdog, grace time.Duration, newTimer func(time.Duration) watchdogTimer) error {
+func waitForChildExit(ctx context.Context, cmd *exec.Cmd, childProcessWaitResults <-chan childProcessWaitResult, watchdog, grace time.Duration, newTimer func(time.Duration) watchdogTimer) error {
 	if newTimer == nil {
 		newTimer = newRealWatchdogTimer
 	}
@@ -465,13 +473,13 @@ func waitForChildExit(ctx context.Context, cmd *exec.Cmd, done <-chan error, wat
 	defer timer.stop()
 	select {
 	case <-ctx.Done():
-		terminateChild(cmd, done, grace)
+		terminateChild(cmd, childProcessWaitResults, grace)
 		return ctx.Err()
 	case <-timer.tick():
-		terminateChild(cmd, done, grace)
+		terminateChild(cmd, childProcessWaitResults, grace)
 		return fmt.Errorf("mutating command made no progress for %s", watchdog)
-	case err := <-done:
-		return err
+	case waitResult := <-childProcessWaitResults:
+		return waitResult.waitError
 	}
 }
 
@@ -509,21 +517,23 @@ func (t *realWatchdogTimer) reset(d time.Duration) {
 
 func (t *realWatchdogTimer) stop() { t.timer.Stop() }
 
-func terminateChild(cmd *exec.Cmd, done <-chan error, grace time.Duration) {
+// Termination callers return the cancellation or watchdog error. Waiting for
+// this result only reaps the child; its wait error is secondary.
+func terminateChild(cmd *exec.Cmd, childProcessWaitResults <-chan childProcessWaitResult, grace time.Duration) {
 	if cmd.Process == nil {
 		return
 	}
 	_ = signalChildProcess(cmd, syscall.SIGTERM)
 	select {
-	case <-done:
+	case <-childProcessWaitResults:
 		return
 	case <-time.After(grace):
 		_ = killChildProcess(cmd)
-		<-done
+		<-childProcessWaitResults
 	}
 }
 
-func terminateChildAndDrain(cmd *exec.Cmd, done <-chan error, frames <-chan childFrame, decodeErrs <-chan error, grace time.Duration) {
+func terminateChildAndDrain(cmd *exec.Cmd, childProcessWaitResults <-chan childProcessWaitResult, frames <-chan childFrame, childDecodeErrorResults <-chan childDecodeErrorResult, grace time.Duration) {
 	if cmd.Process == nil {
 		return
 	}
@@ -533,14 +543,14 @@ func terminateChildAndDrain(cmd *exec.Cmd, done <-chan error, frames <-chan chil
 	timerC := timer.C
 	for {
 		select {
-		case <-done:
+		case <-childProcessWaitResults:
 			return
 		case _, ok := <-frames:
 			if !ok {
 				frames = nil
 			}
-		case <-decodeErrs:
-			decodeErrs = nil
+		case <-childDecodeErrorResults:
+			childDecodeErrorResults = nil
 		case <-timerC:
 			_ = killChildProcess(cmd)
 			timerC = nil
