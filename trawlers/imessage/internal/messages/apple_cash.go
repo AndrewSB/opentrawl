@@ -101,19 +101,19 @@ func decodeAppleCashMessage(balloonBundleID string, payloadData []byte) (*AppleC
 func unarchiveAppleCashPropertyList(archive any) (map[string]any, error) {
 	dictionary, ok := archive.(map[string]any)
 	if !ok {
-		return nil, errors.New("Apple Cash property list is not a dictionary")
+		return nil, errors.New("expected an Apple Cash property list dictionary")
 	}
 	objects, ok := dictionary["$objects"].([]any)
 	if !ok {
-		return nil, errors.New("Apple Cash property list has no object table")
+		return nil, errors.New("missing object table in Apple Cash property list")
 	}
 	top, ok := dictionary["$top"].(map[string]any)
 	if !ok {
-		return nil, errors.New("Apple Cash property list has no root")
+		return nil, errors.New("missing root in Apple Cash property list")
 	}
 	rootUID, ok := top["root"].(plist.UID)
 	if !ok {
-		return nil, errors.New("Apple Cash property list root is not an object reference")
+		return nil, errors.New("expected an object reference at the root of the Apple Cash property list")
 	}
 	resolved, err := resolveAppleCashArchivedObject(objects, rootUID, 0)
 	if err != nil {
@@ -121,19 +121,19 @@ func unarchiveAppleCashPropertyList(archive any) (map[string]any, error) {
 	}
 	root, ok := resolved.(map[string]any)
 	if !ok {
-		return nil, errors.New("Apple Cash property list root object is not a dictionary")
+		return nil, errors.New("expected a dictionary at the root of the Apple Cash property list")
 	}
 	return root, nil
 }
 
 func resolveAppleCashArchivedObject(objects []any, value any, depth int) (any, error) {
 	if depth >= 256 {
-		return nil, errors.New("Apple Cash property list object graph is too deep")
+		return nil, errors.New("object graph in Apple Cash property list is too deep")
 	}
 	if uid, ok := value.(plist.UID); ok {
 		index := uint64(uid)
 		if index >= uint64(len(objects)) {
-			return nil, fmt.Errorf("Apple Cash property list object reference %d is out of range", index)
+			return nil, fmt.Errorf("object reference %d in Apple Cash property list is out of range", index)
 		}
 		return resolveAppleCashArchivedObject(objects, objects[index], depth+1)
 	}
@@ -155,15 +155,15 @@ func resolveAppleCashArchivedObject(objects []any, value any, depth int) (any, e
 		if keysValue, hasKeys := typedValue["NS.keys"]; hasKeys {
 			valuesValue, hasValues := typedValue["NS.objects"]
 			if !hasValues {
-				return nil, errors.New("Apple Cash archived dictionary has no values")
+				return nil, errors.New("missing values in Apple Cash archived dictionary")
 			}
 			keys, ok := keysValue.([]any)
 			if !ok {
-				return nil, errors.New("Apple Cash archived dictionary keys are invalid")
+				return nil, errors.New("invalid keys in Apple Cash archived dictionary")
 			}
 			values, ok := valuesValue.([]any)
 			if !ok || len(keys) != len(values) {
-				return nil, errors.New("Apple Cash archived dictionary values are invalid")
+				return nil, errors.New("invalid values in Apple Cash archived dictionary")
 			}
 			resolved := make(map[string]any, len(keys))
 			for index := range keys {
@@ -173,7 +173,7 @@ func resolveAppleCashArchivedObject(objects []any, value any, depth int) (any, e
 				}
 				key, ok := keyValue.(string)
 				if !ok {
-					return nil, errors.New("Apple Cash archived dictionary key is not text")
+					return nil, errors.New("expected a text key in Apple Cash archived dictionary")
 				}
 				resolved[key], err = resolveAppleCashArchivedObject(objects, values[index], depth+1)
 				if err != nil {
@@ -202,7 +202,7 @@ func resolveAppleCashArchivedObject(objects []any, value any, depth int) (any, e
 func decodeAppleCashPaymentDataURL(value string) ([]byte, error) {
 	header, encoded, found := strings.Cut(strings.TrimSpace(value), ",")
 	if !found || !strings.HasPrefix(header, "data:application/vnd.apple.pkppm") {
-		return nil, errors.New("Apple Cash payment data URL is missing")
+		return nil, errors.New("missing data URL in Apple Cash payment")
 	}
 	if strings.HasSuffix(header, ";base64") {
 		decoded, err := base64.StdEncoding.DecodeString(encoded)
@@ -230,7 +230,7 @@ func decodeAppleCashPeerPaymentMessage(data []byte) (AppleCashMessage, error) {
 		case fieldNumber == 1 || fieldNumber == 3 || fieldNumber == 5 || fieldNumber == 13 || fieldNumber == 21:
 			value, fieldBytes := protowire.ConsumeVarint(data)
 			if wireType != protowire.VarintType || fieldBytes < 0 {
-				return AppleCashMessage{}, fmt.Errorf("Apple Cash payment field %d is invalid", fieldNumber)
+				return AppleCashMessage{}, fmt.Errorf("invalid field %d in Apple Cash payment", fieldNumber)
 			}
 			switch fieldNumber {
 			case 1:
@@ -248,7 +248,7 @@ func decodeAppleCashPeerPaymentMessage(data []byte) (AppleCashMessage, error) {
 		case fieldNumber == 17:
 			value, fieldBytes := protowire.ConsumeFixed64(data)
 			if wireType != protowire.Fixed64Type || fieldBytes < 0 {
-				return AppleCashMessage{}, errors.New("Apple Cash recurring payment start date is invalid")
+				return AppleCashMessage{}, errors.New("invalid start date for Apple Cash recurring payment")
 			}
 			message.RecurringPaymentStartDate = math.Float64frombits(value)
 			data = data[fieldBytes:]
@@ -257,7 +257,7 @@ func decodeAppleCashPeerPaymentMessage(data []byte) (AppleCashMessage, error) {
 			fieldNumber == 20 || fieldNumber == 22 || fieldNumber == 23:
 			value, fieldBytes := protowire.ConsumeBytes(data)
 			if wireType != protowire.BytesType || fieldBytes < 0 {
-				return AppleCashMessage{}, fmt.Errorf("Apple Cash payment field %d is invalid", fieldNumber)
+				return AppleCashMessage{}, fmt.Errorf("invalid field %d in Apple Cash payment", fieldNumber)
 			}
 			switch fieldNumber {
 			case 2:
@@ -300,7 +300,7 @@ func decodeAppleCashPeerPaymentMessage(data []byte) (AppleCashMessage, error) {
 				message.MessagesGroupIdentifier = string(value)
 			}
 			if fieldNumber != 19 && fieldNumber != 20 && !utf8.Valid(value) {
-				return AppleCashMessage{}, fmt.Errorf("Apple Cash payment field %d is not UTF-8", fieldNumber)
+				return AppleCashMessage{}, fmt.Errorf("field %d in Apple Cash payment is not UTF-8", fieldNumber)
 			}
 			data = data[fieldBytes:]
 		default:
@@ -326,14 +326,14 @@ func decodeAppleCashDecimalAmount(data []byte) (AppleCashDecimalAmount, error) {
 		case 7:
 			value, fieldBytes := protowire.ConsumeBytes(data)
 			if wireType != protowire.BytesType || fieldBytes < 0 {
-				return AppleCashDecimalAmount{}, errors.New("Apple Cash decimal mantissa is invalid")
+				return AppleCashDecimalAmount{}, errors.New("invalid mantissa in Apple Cash decimal")
 			}
 			amount.Mantissa = append(amount.Mantissa[:0], value...)
 			data = data[fieldBytes:]
 		case 1, 2, 3, 4, 5, 6:
 			value, fieldBytes := protowire.ConsumeVarint(data)
 			if wireType != protowire.VarintType || fieldBytes < 0 {
-				return AppleCashDecimalAmount{}, fmt.Errorf("Apple Cash decimal field %d is invalid", fieldNumber)
+				return AppleCashDecimalAmount{}, fmt.Errorf("invalid field %d in Apple Cash decimal", fieldNumber)
 			}
 			switch fieldNumber {
 			case 1:
