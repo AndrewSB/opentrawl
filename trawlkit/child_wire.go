@@ -14,13 +14,13 @@ import (
 
 var childFrameWriteMu sync.Mutex
 
-func decodeChildFrames(stdout io.Reader, frames chan<- childFrame, errs chan<- error) {
+func decodeChildFrames(stdout io.Reader, frames chan<- childFrame, childDecodeErrorResults chan<- childDecodeErrorResult) {
 	defer close(frames)
 	reader := bufio.NewReader(stdout)
 	for {
 		frame, err := readChildFrame(reader)
 		if err != nil {
-			errs <- err
+			childDecodeErrorResults <- childDecodeErrorResult{decodeError: err}
 			return
 		}
 		frames <- frame
