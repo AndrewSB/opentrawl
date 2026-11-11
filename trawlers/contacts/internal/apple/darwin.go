@@ -701,23 +701,6 @@ func mergeContact(base, incoming Contact) Contact {
 	return base
 }
 
-func appendUniqueStrings(values []string, incoming ...string) []string {
-	seen := map[string]bool{}
-	for _, value := range values {
-		seen[strings.ToLower(strings.TrimSpace(value))] = true
-	}
-	for _, value := range incoming {
-		value = strings.TrimSpace(value)
-		key := strings.ToLower(value)
-		if value == "" || seen[key] {
-			continue
-		}
-		values = append(values, value)
-		seen[key] = true
-	}
-	return values
-}
-
 func appendUniqueLabeledValue(values []labeledValue, incoming labeledValue) []labeledValue {
 	key := strings.ToLower(strings.TrimSpace(incoming.value))
 	if key == "" {
