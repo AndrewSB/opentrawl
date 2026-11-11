@@ -280,6 +280,14 @@ these links and lists events from that calendar; it does not identify a
 calendar by its display name or account name. Calendar links are navigation
 links for this command rather than records accepted by root `open`.
 
+iMessage message references use the message GUID. Chat references use the
+Messages in iCloud record ID when available and the local chat GUID otherwise.
+`trawl open` accepts either canonical iMessage reference as well as the
+displayed `imessage:record/<alias>` link. The `record/` prefix prevents a link
+issued before this change from opening a different record. Links derive from
+canonical references, and their length can vary with the archive's size and
+collisions.
+
 Calendar records carry the account and an optional
 `CalendarOwnerOrPurposeAnnotation`. This is a user's stated owner or purpose,
 not Calendar source data. Its typed provenance includes the

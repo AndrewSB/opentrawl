@@ -39,9 +39,10 @@ func New() *Crawler {
 
 func (c *Crawler) RegisteredTrawlerDeclaration() trawlkit.RegisteredTrawlerDeclaration {
 	return trawlkit.RegisteredTrawlerDeclaration{
-		RegisteredTrawler:            trawlkit.NewRegisteredTrawlerIdentity(appID),
-		RegisteredTrawlerCommandName: "imessage",
-		RegisteredTrawlerDisplayName: display,
+		RegisteredTrawler:              trawlkit.NewRegisteredTrawlerIdentity(appID),
+		RegisteredTrawlerCommandName:   "imessage",
+		ShortReferencesUseRecordPrefix: true,
+		RegisteredTrawlerDisplayName:   display,
 		RegisteredTrawlerPrivacyBoundary: control.Privacy{
 			Reads:           "The local Messages database and Apple Contacts. Contacts provides names for message participants. This includes messages, conversations and attachment details.",
 			LeavesMachine:   "Nothing. Updates and searches stay on your Mac.",

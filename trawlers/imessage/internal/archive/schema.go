@@ -9,15 +9,7 @@ create table if not exists handles (
   display_name text
 );
 
-create table if not exists chats (
-  source_rowid integer primary key,
-  guid text not null,
-  chat_identifier text,
-  service_name text,
-  display_name text,
-  room_name text,
-  is_archived integer not null default 0
-);
+` + chatSchema + `
 
 create table if not exists chat_participants (
   chat_rowid integer not null,
@@ -70,6 +62,21 @@ create table if not exists owner_handles (
 create index if not exists idx_chat_messages_chat on chat_messages(chat_rowid, message_rowid);
 create index if not exists idx_chat_messages_message on chat_messages(message_rowid, chat_rowid);
 create index if not exists idx_messages_date on messages(date, source_rowid);
+create index if not exists idx_messages_guid on messages(guid, date desc, source_rowid desc);
+`
+
+const chatSchema = `
+create table if not exists chats (
+  source_rowid integer primary key,
+  guid text not null,
+  cloudkit_record_id text,
+  chat_id text not null,
+  chat_identifier text,
+  service_name text,
+  display_name text,
+  room_name text,
+  is_archived integer not null default 0
+);
 `
 
 const appleCashMessagesSchema = `create table if not exists apple_cash_messages (

@@ -1,8 +1,8 @@
 {{WITH}}
 select
-  m.source_rowid,
   m.guid,
   coalesce(cm.chat_rowid, 0),
+  coalesce(c.chat_id, ''),
   coalesce(nullif(trim(c.display_name), ''), nullif(trim(c.room_name), ''), nullif(trim(c.chat_identifier), ''), c.guid, ''),
   case
     when coalesce(pc.participants, 0) > 1 or nullif(trim(c.room_name), '') is not null then 'group'
@@ -35,7 +35,13 @@ left join (
   from chat_participants
   group by chat_rowid
 ) pc on pc.chat_rowid = cm.chat_rowid
-where 1 = 1
+where m.source_rowid = (
+  select newest.source_rowid
+  from messages newest
+  where newest.guid = m.guid
+  order by newest.date desc, newest.source_rowid desc
+  limit 1
+)
 {{FTS_FILTER}}
 {{WHO_FILTER}}
 {{TIME_FILTER}}

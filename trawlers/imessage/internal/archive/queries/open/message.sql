@@ -2,6 +2,7 @@ select
   m.source_rowid,
   m.guid,
   coalesce(cm.chat_rowid, 0),
+  coalesce(c.chat_id, ''),
   m.handle_rowid,
   coalesce(h.handle, ''),
   coalesce(h.display_name, ''),
@@ -21,6 +22,6 @@ left join (
   from chat_participants
   group by chat_rowid
 ) pc on pc.chat_rowid = cm.chat_rowid
-where m.source_rowid = ?
-order by cm.chat_rowid
+where m.guid = ?
+order by m.date desc, m.source_rowid desc, cm.chat_rowid
 limit 1

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/opentrawl/opentrawl/trawlers/imessage/internal/messages"
 	"github.com/opentrawl/opentrawl/trawlkit/state"
 	ckstore "github.com/opentrawl/opentrawl/trawlkit/store"
 )
@@ -66,16 +67,12 @@ func (s *Store) CountChats(ctx context.Context) (int64, error) {
 	return countTable(ctx, s.store.DB(), "chats")
 }
 
-func (s *Store) Messages(ctx context.Context, chatID string, limit int, asc bool) ([]MessageRow, error) {
+func (s *Store) Messages(ctx context.Context, chat ChatSummary, limit int, asc bool) ([]MessageRow, error) {
 	messageChatFilterSQLClause := ""
 	args := []any{}
-	if strings.TrimSpace(chatID) != "" {
-		id, err := parseID(chatID, "chat")
-		if err != nil {
-			return nil, err
-		}
+	if chat.ChatID != "" {
 		messageChatFilterSQLClause = "where cm.chat_rowid = ?"
-		args = append(args, id)
+		args = append(args, chat.chatRowID)
 	}
 	order := "desc"
 	tie := "desc"
@@ -96,31 +93,23 @@ func (s *Store) Messages(ctx context.Context, chatID string, limit int, asc bool
 	return scanMessages(rows)
 }
 
-func (s *Store) CountMessages(ctx context.Context, chatID string) (int64, error) {
+func (s *Store) CountMessages(ctx context.Context, chat ChatSummary) (int64, error) {
 	messageChatFilterSQLClause := ""
 	args := []any{}
-	if strings.TrimSpace(chatID) != "" {
-		id, err := parseID(chatID, "chat")
-		if err != nil {
-			return 0, err
-		}
+	if chat.ChatID != "" {
 		messageChatFilterSQLClause = "where chat_rowid = ?"
-		args = append(args, id)
+		args = append(args, chat.chatRowID)
 	}
 	var count int64
 	err := s.store.DB().QueryRowContext(ctx, countMessagesQuery(messageChatFilterSQLClause), args...).Scan(&count)
 	return count, err
 }
 
-func (s *Store) OpenMessage(ctx context.Context, messageID string, contextLimit int) (MessageContext, error) {
-	id, err := parseID(messageID, "message")
-	if err != nil {
-		return MessageContext{}, err
-	}
+func (s *Store) OpenMessage(ctx context.Context, messageGUID messages.MessageGUID, contextLimit int) (MessageContext, error) {
 	if contextLimit < 0 {
 		contextLimit = 0
 	}
-	targetRows, err := s.messageRows(ctx, openMessageSQL, id)
+	targetRows, err := s.messageRows(ctx, openMessageSQL, messageGUID)
 	if err != nil {
 		return MessageContext{}, err
 	}
@@ -132,7 +121,7 @@ func (s *Store) OpenMessage(ctx context.Context, messageID string, contextLimit 
 	if target.ChatID == "" {
 		return out, nil
 	}
-	chat, err := s.Chat(ctx, target.ChatID)
+	chat, err := s.readChatSummary(ctx, "where c.source_rowid = ?", target.chatRowID)
 	if err != nil {
 		return MessageContext{}, err
 	}
@@ -140,11 +129,7 @@ func (s *Store) OpenMessage(ctx context.Context, messageID string, contextLimit 
 	if contextLimit == 0 {
 		return out, nil
 	}
-	chatID, err := parseID(target.ChatID, "chat")
-	if err != nil {
-		return MessageContext{}, err
-	}
-	before, err := s.messageRows(ctx, openBeforeSQL, chatID, target.rawDate, target.rawDate, id, contextLimit+1)
+	before, err := s.messageRows(ctx, openBeforeSQL, target.chatRowID, target.rawDate, target.rawDate, target.messageRowID, contextLimit+1)
 	if err != nil {
 		return MessageContext{}, err
 	}
@@ -155,7 +140,7 @@ func (s *Store) OpenMessage(ctx context.Context, messageID string, contextLimit 
 	for i, j := 0, len(before)-1; i < j; i, j = i+1, j-1 {
 		before[i], before[j] = before[j], before[i]
 	}
-	after, err := s.messageRows(ctx, openAfterSQL, chatID, target.rawDate, target.rawDate, id, contextLimit+1)
+	after, err := s.messageRows(ctx, openAfterSQL, target.chatRowID, target.rawDate, target.rawDate, target.messageRowID, contextLimit+1)
 	if err != nil {
 		return MessageContext{}, err
 	}
@@ -205,20 +190,19 @@ func (s *Store) searchResults(ctx context.Context, query string, options SearchO
 	}
 	defer func() { _ = rows.Close() }()
 	out := []SearchResult{}
+	var chatRowIDs []int64
 	for rows.Next() {
-		var messageID, chatIDValue, handleID int64
+		var chatRowID, handleID int64
 		var participantCount int64
 		var fromMe, hasAttachments int
 		var senderHandle, senderDisplayName, chatDisplayName string
 		var result SearchResult
 		var rawDate int64
-		if err := rows.Scan(&messageID, &result.GUID, &chatIDValue, &result.ChatTitle, &result.ChatKind, &result.ChatParticipantCount, &handleID, &senderHandle, &senderDisplayName, &rawDate, &result.Service, &fromMe, &hasAttachments, &result.Text, &chatDisplayName, &participantCount, &result.Snippet); err != nil {
+		if err := rows.Scan(&result.GUID, &chatRowID, &result.ChatID, &result.ChatTitle, &result.ChatKind, &result.ChatParticipantCount, &handleID, &senderHandle, &senderDisplayName, &rawDate, &result.Service, &fromMe, &hasAttachments, &result.Text, &chatDisplayName, &participantCount, &result.Snippet); err != nil {
 			return nil, err
 		}
-		result.MessageID = strconv.FormatInt(messageID, 10)
-		if chatIDValue != 0 {
-			result.ChatID = strconv.FormatInt(chatIDValue, 10)
-		}
+		result.MessageID = result.GUID
+		chatRowIDs = append(chatRowIDs, chatRowID)
 		if handleID != 0 {
 			result.HandleID = strconv.FormatInt(handleID, 10)
 		}
@@ -243,7 +227,7 @@ func (s *Store) searchResults(ctx context.Context, query string, options SearchO
 		conversationParticipantIdentities, err := readConversationParticipantIdentities(
 			ctx,
 			s.store.DB(),
-			out[i].ChatID,
+			chatRowIDs[i],
 		)
 		if err != nil {
 			return nil, err
@@ -288,7 +272,9 @@ func hasSearchFilter(options SearchOptions) bool {
 
 type messageScanRow struct {
 	MessageRow
-	rawDate int64
+	messageRowID int64
+	chatRowID    int64
+	rawDate      int64
 }
 
 func (s *Store) messageRows(ctx context.Context, query string, args ...any) ([]messageScanRow, error) {
@@ -320,18 +306,15 @@ func scanMessageRows(rows *sql.Rows) ([]messageScanRow, error) {
 	out := []messageScanRow{}
 	for rows.Next() {
 		var row messageScanRow
-		var messageID, chatID, handleID int64
+		var handleID int64
 		var participantCount int64
 		var fromMe, hasAttachments int
 		var senderDisplayName, chatDisplayName string
 		var rawDate int64
-		if err := rows.Scan(&messageID, &row.GUID, &chatID, &handleID, &row.SenderHandle, &senderDisplayName, &rawDate, &row.Service, &fromMe, &row.Text, &hasAttachments, &chatDisplayName, &participantCount); err != nil {
+		if err := rows.Scan(&row.messageRowID, &row.GUID, &row.chatRowID, &row.ChatID, &handleID, &row.SenderHandle, &senderDisplayName, &rawDate, &row.Service, &fromMe, &row.Text, &hasAttachments, &chatDisplayName, &participantCount); err != nil {
 			return nil, err
 		}
-		row.MessageID = strconv.FormatInt(messageID, 10)
-		if chatID != 0 {
-			row.ChatID = strconv.FormatInt(chatID, 10)
-		}
+		row.MessageID = row.GUID
 		if handleID != 0 {
 			row.HandleID = strconv.FormatInt(handleID, 10)
 		}

@@ -80,10 +80,10 @@ func (r *Runtime) federationOpenTrawlers(installedTrawlers []InstalledTrawler) [
 		if installedTrawler.TrawlerDiscoveryError != nil {
 			trawlers = append(trawlers, federation.OpenTrawler{Manifest: manifest, Run: func(
 				context.Context,
-				*trawlkit.LocalTrawlerShortReference,
+				trawlkit.OpenRecordTarget,
 				*trawlkit.RecordAnchorIdentifier,
-			) (*open.OpenRecord, *federationcontract.TrawlerOperationFailure) {
-				return nil, federation.FailureForError(manifest, federationcontract.SharedTrawlerOperation_SHARED_TRAWLER_OPERATION_OPEN, installedTrawler.TrawlerDiscoveryError)
+			) (*open.OpenRecord, *trawlkit.LocalTrawlerShortReference, *federationcontract.TrawlerOperationFailure) {
+				return nil, nil, federation.FailureForError(manifest, federationcontract.SharedTrawlerOperation_SHARED_TRAWLER_OPERATION_OPEN, installedTrawler.TrawlerDiscoveryError)
 			}})
 			continue
 		}
@@ -92,34 +92,34 @@ func (r *Runtime) federationOpenTrawlers(installedTrawlers []InstalledTrawler) [
 		}
 		trawlers = append(trawlers, federation.OpenTrawler{Manifest: manifest, Run: func(
 			ctx context.Context,
-			localShortReference *trawlkit.LocalTrawlerShortReference,
+			target trawlkit.OpenRecordTarget,
 			recordAnchor *trawlkit.RecordAnchorIdentifier,
-		) (*open.OpenRecord, *federationcontract.TrawlerOperationFailure) {
-			record, err := r.trawlerExecutor().OpenRecord(
+		) (*open.OpenRecord, *trawlkit.LocalTrawlerShortReference, *federationcontract.TrawlerOperationFailure) {
+			record, resolvedShortReference, err := r.trawlerExecutor().OpenRecord(
 				ctx,
 				installedTrawler.Trawler,
-				localShortReference,
+				target,
 				recordAnchor,
 			)
 			if isTimeoutError(err) {
 				err = context.DeadlineExceeded
 			}
 			if err != nil {
-				return nil, federation.FailureForError(manifest, federationcontract.SharedTrawlerOperation_SHARED_TRAWLER_OPERATION_OPEN, err)
+				return nil, nil, federation.FailureForError(manifest, federationcontract.SharedTrawlerOperation_SHARED_TRAWLER_OPERATION_OPEN, err)
 			}
 			if openedPersonRecord := record.GetPersonRecord(); openedPersonRecord != nil {
 				personMatchResponse, err := r.trawlerExecutor().Who(ctx, installedTrawler.Trawler,
 					trawlkit.CanonicalArchiveRecordReferenceText(record.GetCanonicalRecordReference()))
 				if err != nil {
-					return nil, federation.FailureForError(manifest, federationcontract.SharedTrawlerOperation_SHARED_TRAWLER_OPERATION_OPEN, err)
+					return nil, nil, federation.FailureForError(manifest, federationcontract.SharedTrawlerOperation_SHARED_TRAWLER_OPERATION_OPEN, err)
 				}
 				openedPersonCandidates := whoCandidatesFromMatches(personMatchResponse, "")
 				if len(openedPersonCandidates) != 1 {
-					return nil, federation.FailureForError(manifest, federationcontract.SharedTrawlerOperation_SHARED_TRAWLER_OPERATION_OPEN,
+					return nil, nil, federation.FailureForError(manifest, federationcontract.SharedTrawlerOperation_SHARED_TRAWLER_OPERATION_OPEN,
 						errors.New("opened person reference must resolve to one person"))
 				}
 				if failures := r.readPersonMessageCountsFromTrawlers(installedTrawlers, openedPersonCandidates); len(failures) > 0 {
-					return nil, failures[0]
+					return nil, nil, failures[0]
 				}
 				openedPersonRecord.MessageCountInvolvingPersonAcrossTrawlers = uint64(openedPersonCandidates[0].MessageCountInvolvingPerson)
 				openedPersonRecord.PersonMessageCountsFromTrawlerArchives = personMessageCountsWithTrawlerDisplayNames(
@@ -127,7 +127,7 @@ func (r *Runtime) federationOpenTrawlers(installedTrawlers []InstalledTrawler) [
 					trawlerDisplayNamesByIdentity(installedTrawlers),
 				)
 			}
-			return record, nil
+			return record, resolvedShortReference, nil
 		}})
 	}
 	return trawlers

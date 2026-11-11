@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/opentrawl/opentrawl/trawlkit/output"
+	"github.com/opentrawl/opentrawl/trawlkit/render"
 	"github.com/opentrawl/opentrawl/trawlkit/shortref"
 )
 
@@ -41,8 +43,17 @@ func (r *TrawlerCommandExecutionRequest) ResolveLocalConversationShortReferenceT
 	return strings.TrimPrefix(canonicalConversationRecordReference, providerNativeConversationRecordReferencePrefix), nil
 }
 
-func ValidShortRef(alias string) bool {
-	return shortref.ValidAlias(strings.TrimSpace(alias))
+const recordShortReferencePrefix = "record/"
+
+func ValidShortRef(reference string) bool {
+	return shortref.ValidAlias(strings.TrimPrefix(strings.TrimSpace(reference), recordShortReferencePrefix))
+}
+
+func (r *TrawlerCommandExecutionRequest) formatLocalShortReference(alias string) *LocalTrawlerShortReference {
+	if r.shortReferencesUseRecordPrefix {
+		alias = recordShortReferencePrefix + alias
+	}
+	return NewLocalTrawlerShortReference(alias)
 }
 
 // AssignShortReferencesForObservedArchiveRecordsUsingCallerOwnedSQLTransaction
@@ -140,9 +151,14 @@ func (r *TrawlerCommandExecutionRequest) ResolveShortReference(
 	ctx context.Context,
 	localTrawlerShortReference *LocalTrawlerShortReference,
 ) ([]*CanonicalArchiveRecordReference, error) {
-	alias := LocalTrawlerShortReferenceText(localTrawlerShortReference)
-	if !ValidShortRef(alias) {
+	alias, hasRecordPrefix := strings.CutPrefix(
+		LocalTrawlerShortReferenceText(localTrawlerShortReference), recordShortReferencePrefix,
+	)
+	if !shortref.ValidAlias(alias) {
 		return nil, ErrUnknownShortRef
+	}
+	if r != nil && hasRecordPrefix != r.shortReferencesUseRecordPrefix {
+		return nil, output.UsageError{Err: render.LinkIsNotValid()}
 	}
 	matches, err := r.lookupShortRef(ctx, alias)
 	if err != nil {
@@ -189,6 +205,7 @@ func (r *TrawlerCommandExecutionRequest) LocalShortReferencesForCanonicalArchive
 		var matches []CanonicalArchiveRecordReferenceWithLocalTrawlerShortReference
 		for _, entry := range r.readOnlyShortReferenceCatalog {
 			if wanted[CanonicalArchiveRecordReferenceText(entry.CanonicalArchiveRecordReference)] {
+				entry.LocalTrawlerShortReference = r.formatLocalShortReference(LocalTrawlerShortReferenceText(entry.LocalTrawlerShortReference))
 				matches = append(matches, entry)
 			}
 		}
@@ -219,7 +236,7 @@ func (r *TrawlerCommandExecutionRequest) LocalShortReferencesForCanonicalArchive
 		}
 		references = append(references, CanonicalArchiveRecordReferenceWithLocalTrawlerShortReference{
 			CanonicalArchiveRecordReference: NewCanonicalArchiveRecordReference(canonicalArchiveRecordReference),
-			LocalTrawlerShortReference:      NewLocalTrawlerShortReference(localTrawlerShortReference),
+			LocalTrawlerShortReference:      r.formatLocalShortReference(localTrawlerShortReference),
 		})
 	}
 	return references, nil

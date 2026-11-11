@@ -1,7 +1,8 @@
 select
   m.source_rowid,
   m.guid,
-  cm.chat_rowid,
+  coalesce(cm.chat_rowid, 0),
+  coalesce(c.chat_id, ''),
   m.handle_rowid,
   coalesce(h.handle, ''),
   coalesce(h.display_name, ''),

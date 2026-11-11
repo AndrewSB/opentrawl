@@ -75,7 +75,7 @@ func (r *Runtime) appOpenResponse(
 		ctx,
 		r.federationOpenTrawlers(discoverInstalledTrawlers(ctx)),
 		selectedTrawler,
-		localShortReference,
+		trawlkit.OpenRecordTarget{LocalShortReference: localShortReference},
 		recordAnchor,
 	)
 	response.RequestedTrawlLink = requestedTrawlLink

@@ -15,7 +15,7 @@ func Open(
 	ctx context.Context,
 	trawlers []OpenTrawler,
 	selectedTrawler *trawlkit.RegisteredTrawlerIdentity,
-	localShortReference *trawlkit.LocalTrawlerShortReference,
+	target trawlkit.OpenRecordTarget,
 	requestedRecordAnchor *trawlkit.RecordAnchorIdentifier,
 ) *open.OpenResponse {
 	response := &open.OpenResponse{RequestedRecordAnchor: requestedRecordAnchor}
@@ -30,7 +30,7 @@ func Open(
 		response.Outcome = federation.OperationOutcome_OPERATION_OUTCOME_FAILED
 		return response
 	}
-	if trawlkit.LocalTrawlerShortReferenceText(localShortReference) == "" {
+	if trawlkit.LocalTrawlerShortReferenceText(target.LocalShortReference) == "" && target.CanonicalRecordReference == nil {
 		response.Failure = operationFailure(trawler.Manifest, federation.SharedTrawlerOperation_SHARED_TRAWLER_OPERATION_OPEN, "a local short reference is required", federation.FailureCode_FAILURE_CODE_INVALID_INPUT)
 	} else if strings.TrimSpace(trawler.SkipReason) != "" {
 		response.Failure = &federation.TrawlerOperationFailure{
@@ -44,7 +44,7 @@ func Open(
 	} else if err := ctx.Err(); err != nil {
 		response.Failure = FailureForError(trawler.Manifest, federation.SharedTrawlerOperation_SHARED_TRAWLER_OPERATION_OPEN, err)
 	} else {
-		record, failure := runOpen(ctx, trawler, localShortReference, requestedRecordAnchor)
+		record, resolvedShortReference, failure := runOpen(ctx, trawler, target, requestedRecordAnchor)
 		switch {
 		case failure != nil:
 			response.Failure = callbackFailure(ctx, trawler.Manifest, failure)
@@ -60,6 +60,17 @@ func Open(
 		case trawlkit.RegisteredTrawlerIdentityText(record.GetRecordTrawler()) != registeredTrawlerIdentityText(trawler.Manifest):
 			response.Failure = operationFailure(trawler.Manifest, federation.SharedTrawlerOperation_SHARED_TRAWLER_OPERATION_OPEN, "record trawler does not match selected trawler", federation.FailureCode_FAILURE_CODE_INTERNAL)
 		default:
+			if target.CanonicalRecordReference != nil {
+				link, err := trawlkit.ComposeGloballyRoutableTrawlLink(trawlkit.GloballyRoutableTrawlLinkRoute{
+					RegisteredTrawler:   selectedTrawler,
+					LocalShortReference: resolvedShortReference,
+				})
+				if err != nil {
+					response.Failure = FailureForError(trawler.Manifest, federation.SharedTrawlerOperation_SHARED_TRAWLER_OPERATION_OPEN, err)
+					break
+				}
+				response.RequestedTrawlLink = link
+			}
 			response.Record = record
 			response.Outcome = federation.OperationOutcome_OPERATION_OUTCOME_COMPLETE
 			return response
@@ -72,9 +83,9 @@ func Open(
 func runOpen(
 	ctx context.Context,
 	trawler OpenTrawler,
-	localShortReference *trawlkit.LocalTrawlerShortReference,
+	target trawlkit.OpenRecordTarget,
 	requestedRecordAnchor *trawlkit.RecordAnchorIdentifier,
-) (record *open.OpenRecord, failure *federation.TrawlerOperationFailure) {
+) (record *open.OpenRecord, resolvedShortReference *trawlkit.LocalTrawlerShortReference, failure *federation.TrawlerOperationFailure) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			record = nil
@@ -85,7 +96,7 @@ func runOpen(
 			)
 		}
 	}()
-	return trawler.Run(ctx, localShortReference, requestedRecordAnchor)
+	return trawler.Run(ctx, target, requestedRecordAnchor)
 }
 
 func findOpenTrawler(

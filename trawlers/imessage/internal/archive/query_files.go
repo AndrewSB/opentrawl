@@ -87,11 +87,11 @@ var insertMessagesFTSSQL string
 const unreadReceivedExpr = `count(distinct case when m.is_from_me = 0 and coalesce(m.is_read, 0) = 0 then cm.message_rowid end)`
 
 // chatSummaryQuery builds the chat summary read. unreadSelect fills the unread
-// column, and having filters to unread chats when set.
-func chatSummaryQuery(where, unreadSelect, having string) string {
+// column, and unreadFilter filters the selected chats when set.
+func chatSummaryQuery(where, unreadSelect, unreadFilter string) string {
 	query := strings.Replace(chatSummarySQL, "{{UNREAD_SELECT}}", unreadSelect, 1)
 	query = strings.Replace(query, "{{WHERE}}", where, 1)
-	return strings.Replace(query, "{{HAVING}}", having, 1)
+	return strings.Replace(query, "{{UNREAD_FILTER}}", unreadFilter, 1)
 }
 
 func messagesQuery(order, tie, messageChatFilterSQLClause, limitClause string) string {

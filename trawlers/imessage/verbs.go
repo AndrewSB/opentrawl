@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/opentrawl/opentrawl/trawlers/imessage/internal/archive"
@@ -141,39 +140,38 @@ func (c *Crawler) ListMessages(
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(query.OptionalLocalConversationShortReferenceForRestrictingMessagesToOneConversation) != "" {
-		resolvedConversationID, parseErr := strconv.ParseInt(providerNativeConversationIdentifier, 10, 64)
-		if parseErr != nil || resolvedConversationID <= 0 {
-			return nil, usageErr(render.LinkIsNotValid())
-		}
-	}
 	st, err := archive.UseExisting(ctx, req.OpenedTrawlerArchiveStore, req.TrawlerArchivePaths.TrawlerArchivePath)
 	if err != nil {
 		return nil, archiveErr(fmt.Errorf("open archive: %w", err))
 	}
-	messages, err := st.Messages(ctx, providerNativeConversationIdentifier, query.MaximumReturnedMessageCount, false)
-	if err != nil {
-		return nil, err
-	}
-	total, err := st.CountMessages(ctx, providerNativeConversationIdentifier)
-	if err != nil {
-		return nil, err
-	}
-	messageChatSummariesByChatID := make(map[string]archive.ChatSummary)
+	restrictedChatID := archive.ChatID(providerNativeConversationIdentifier)
+	var restrictedChat archive.ChatSummary
 	conversationDisplayNameForRestrictedMessageRecords := ""
-	if providerNativeConversationIdentifier != "" {
-		chat, err := st.Chat(ctx, providerNativeConversationIdentifier)
+	messageChatSummariesByChatID := make(map[archive.ChatID]archive.ChatSummary)
+	if restrictedChatID != "" {
+		if !chatIDPattern.MatchString(string(restrictedChatID)) {
+			return nil, usageErr(render.LinkIsNotValid())
+		}
+		restrictedChat, err = st.Chat(ctx, restrictedChatID)
 		if errors.Is(err, archive.ErrChatNotFound) {
 			return nil, commandErr(1, "not_found", render.NoArchiveRecordHasLink(render.ArchiveRecordKindNounConversation))
 		}
 		if err != nil {
 			return nil, err
 		}
-		messageChatSummariesByChatID[providerNativeConversationIdentifier] = chat
-		conversationDisplayNameForRestrictedMessageRecords = conversationDisplayName(chat)
+		messageChatSummariesByChatID[restrictedChatID] = restrictedChat
+		conversationDisplayNameForRestrictedMessageRecords = conversationDisplayName(restrictedChat)
+	}
+	messages, err := st.Messages(ctx, restrictedChat, query.MaximumReturnedMessageCount, false)
+	if err != nil {
+		return nil, err
+	}
+	total, err := st.CountMessages(ctx, restrictedChat)
+	if err != nil {
+		return nil, err
 	}
 	messageRecords := make([]*message.MessageRecord, 0, len(messages))
-	messagesAreRestrictedToOneConversation := providerNativeConversationIdentifier != ""
+	messagesAreRestrictedToOneConversation := restrictedChatID != ""
 	for _, message := range messages {
 		chat, found := messageChatSummariesByChatID[message.ChatID]
 		if !found {

@@ -134,13 +134,31 @@ func (e TrawlerExecutor) Search(
 		nil
 }
 
+type OpenRecordTarget struct {
+	LocalShortReference      *LocalTrawlerShortReference
+	CanonicalRecordReference *CanonicalArchiveRecordReference
+}
+
 type executeTrawlerOpenRecordOperation struct {
-	localShortReference *LocalTrawlerShortReference
-	recordAnchor        *RecordAnchorIdentifier
-	result              *open.OpenRecord
+	canonicalRecordReference *CanonicalArchiveRecordReference
+	localShortReference      *LocalTrawlerShortReference
+	recordAnchor             *RecordAnchorIdentifier
+	result                   *open.OpenRecord
 }
 
 func (operation *executeTrawlerOpenRecordOperation) execute(ctx context.Context, trawler Trawler, req *TrawlerCommandExecutionRequest) error {
+	if operation.canonicalRecordReference != nil {
+		references, err := req.LocalShortReferencesForCanonicalArchiveRecordReferences(
+			ctx, []*CanonicalArchiveRecordReference{operation.canonicalRecordReference},
+		)
+		if err != nil {
+			return err
+		}
+		operation.localShortReference = LocalTrawlerShortReferenceForCanonicalArchiveRecordReference(references, operation.canonicalRecordReference)
+		if operation.localShortReference == nil {
+			return ErrUnknownShortRef
+		}
+	}
 	conversationRecordIdentifiedByLocalTrawlerShortReference, err :=
 		findConversationRecordIdentifiedByLocalTrawlerShortReference(
 			ctx,
@@ -269,22 +287,26 @@ func setGloballyRoutableTrawlLinkForConversationContainingOpenedMessage(
 func (e TrawlerExecutor) OpenRecord(
 	ctx context.Context,
 	trawler Trawler,
-	localShortReference *LocalTrawlerShortReference,
+	target OpenRecordTarget,
 	recordAnchor *RecordAnchorIdentifier,
-) (*open.OpenRecord, error) {
+) (*open.OpenRecord, *LocalTrawlerShortReference, error) {
 	command, err := sharedTrawlerOperationTargetCommand(
 		trawler,
 		federation.SharedTrawlerOperation_SHARED_TRAWLER_OPERATION_OPEN,
-		LocalTrawlerShortReferenceText(localShortReference),
+		LocalTrawlerShortReferenceText(target.LocalShortReference),
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	operation := &executeTrawlerOpenRecordOperation{localShortReference: localShortReference, recordAnchor: recordAnchor}
+	operation := &executeTrawlerOpenRecordOperation{
+		localShortReference:      target.LocalShortReference,
+		canonicalRecordReference: target.CanonicalRecordReference,
+		recordAnchor:             recordAnchor,
+	}
 	if err := e.runSharedTrawlerOperation(ctx, trawler, command, operation); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return operation.result, nil
+	return operation.result, operation.localShortReference, nil
 }
 
 type executeTrawlerPersonMatchOperation struct {

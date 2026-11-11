@@ -29,14 +29,19 @@ type Handle struct {
 	DisplayName       string
 }
 
+type MessageGUID string
+type ChatGUID string
+type ChatCloudKitRecordID string
+
 type Chat struct {
-	SourceRowID    int64
-	GUID           string
-	ChatIdentifier string
-	ServiceName    string
-	DisplayName    string
-	RoomName       string
-	IsArchived     bool
+	SourceRowID      int64
+	GUID             ChatGUID
+	CloudKitRecordID *ChatCloudKitRecordID
+	ChatIdentifier   string
+	ServiceName      string
+	DisplayName      string
+	RoomName         string
+	IsArchived       bool
 }
 
 type Participant struct {
@@ -51,7 +56,7 @@ type ChatMessage struct {
 
 type Message struct {
 	SourceRowID    int64
-	GUID           string
+	GUID           MessageGUID
 	HandleRowID    int64
 	Date           int64
 	Service        string
@@ -153,7 +158,7 @@ func extractChats(ctx context.Context, db *sql.DB) ([]Chat, error) {
 	for rows.Next() {
 		var c Chat
 		var archived int
-		if err := rows.Scan(&c.SourceRowID, &c.GUID, &c.ChatIdentifier, &c.ServiceName, &c.DisplayName, &c.RoomName, &archived); err != nil {
+		if err := rows.Scan(&c.SourceRowID, &c.GUID, &c.CloudKitRecordID, &c.ChatIdentifier, &c.ServiceName, &c.DisplayName, &c.RoomName, &archived); err != nil {
 			return nil, err
 		}
 		c.IsArchived = archived != 0

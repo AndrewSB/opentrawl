@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/opentrawl/opentrawl/trawlers/imessage"
 	"github.com/opentrawl/opentrawl/trawlkit"
 	conversation "github.com/opentrawl/opentrawl/trawlkit/proto/trawl/conversation"
 	federation "github.com/opentrawl/opentrawl/trawlkit/proto/trawl/federation"
@@ -25,15 +26,23 @@ var applePhotoUUIDAcceptedByOpenCommandPattern = regexp.MustCompile(`(?i)^[0-9a-
 func (c *OpenCmd) Run(r *Runtime) error {
 	requestedTrawlLink := trawlkit.NewGloballyRoutableTrawlLink(c.Link)
 	route, err := trawlkit.ParseGloballyRoutableTrawlLink(requestedTrawlLink)
+	target := trawlkit.OpenRecordTarget{LocalShortReference: route.LocalShortReference}
 	if err != nil {
-		applePhotoUUIDArgument := strings.TrimPrefix(strings.TrimSpace(c.Link), "photos:")
-		if !applePhotoUUIDAcceptedByOpenCommandPattern.MatchString(applePhotoUUIDArgument) {
-			return render.LinkIsNotValid()
-		}
 		requestedTrawlLink = nil
-		route = trawlkit.GloballyRoutableTrawlLinkRoute{
-			RegisteredTrawler:   trawlkit.NewRegisteredTrawlerIdentity("photos"),
-			LocalShortReference: trawlkit.NewLocalTrawlerShortReference(strings.ToUpper(applePhotoUUIDArgument)),
+		canonicalReference, err := imessage.ParseCanonicalRecordReferenceForOpen(c.Link)
+		if err != nil {
+			return err
+		}
+		if canonicalReference != nil {
+			route.RegisteredTrawler = trawlkit.NewRegisteredTrawlerIdentity("imessage")
+			target.CanonicalRecordReference = canonicalReference
+		} else {
+			applePhotoUUIDArgument := strings.TrimPrefix(strings.TrimSpace(c.Link), "photos:")
+			if !applePhotoUUIDAcceptedByOpenCommandPattern.MatchString(applePhotoUUIDArgument) {
+				return render.LinkIsNotValid()
+			}
+			route.RegisteredTrawler = trawlkit.NewRegisteredTrawlerIdentity("photos")
+			target.LocalShortReference = trawlkit.NewLocalTrawlerShortReference(strings.ToUpper(applePhotoUUIDArgument))
 		}
 	}
 	installedTrawlers := discoverInstalledTrawlers(r.ctx)
@@ -46,7 +55,7 @@ func (c *OpenCmd) Run(r *Runtime) error {
 	response := r.canonicalOpen(
 		openTrawlers,
 		route.RegisteredTrawler,
-		route.LocalShortReference,
+		target,
 		requestedTrawlLink,
 	)
 	if !c.Participants || response.GetFailure() != nil {
