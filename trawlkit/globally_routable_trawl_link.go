@@ -6,7 +6,6 @@ import (
 
 	"github.com/opentrawl/opentrawl/trawlkit/output"
 	"github.com/opentrawl/opentrawl/trawlkit/render"
-	"github.com/opentrawl/opentrawl/trawlkit/shortref"
 )
 
 const globallyRoutableTrawlLinkSeparator = ":"
@@ -22,7 +21,7 @@ func ComposeGloballyRoutableTrawlLink(route GloballyRoutableTrawlLinkRoute) (*Gl
 	if registeredTrawlerIdentity == "" || strings.Contains(registeredTrawlerIdentity, globallyRoutableTrawlLinkSeparator) {
 		return nil, fmt.Errorf("registered trawler identity is not valid for a globally routable trawl link")
 	}
-	if !shortref.ValidAlias(localShortReference) {
+	if !ValidShortRef(localShortReference) {
 		return nil, fmt.Errorf("local trawler short reference is not valid for a globally routable trawl link")
 	}
 	return NewGloballyRoutableTrawlLink(

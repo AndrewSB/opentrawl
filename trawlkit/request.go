@@ -25,6 +25,7 @@ func IsInternalAppRequest(ctx context.Context) bool {
 
 type RegisteredTrawlerDeclaration struct {
 	SearchMatchesResolvedPersonDisplayNames bool
+	ShortReferencesUseRecordPrefix          bool
 	RegisteredTrawler                       *RegisteredTrawlerIdentity
 	RegisteredTrawlerCommandName            string
 	RegisteredTrawlerAliases                []string
@@ -50,6 +51,7 @@ type TrawlerCommandExecutionRequest struct {
 	TrawlerCommandLog                 *cklog.Run
 	ReportTrawlerCommandProgress      func(Progress)
 	RequestedRecordAnchor             *RecordAnchorIdentifier
+	shortReferencesUseRecordPrefix    bool
 	readOnlyShortReferenceCatalog     []CanonicalArchiveRecordReferenceWithLocalTrawlerShortReference
 }
 

@@ -3,8 +3,6 @@ package archive
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"strconv"
 
 	person "github.com/opentrawl/opentrawl/trawlkit/proto/trawl/person"
 )
@@ -20,9 +18,9 @@ type ChatListOptions struct {
 func (s *Store) Chats(ctx context.Context, opts ChatListOptions) ([]ChatSummary, error) {
 	db := s.store.DB()
 	unreadSelect := unreadReceivedExpr
-	having := ""
+	unreadFilter := ""
 	if opts.UnreadOnly {
-		having = "having " + unreadReceivedExpr + " > 0"
+		unreadFilter = "and unread > 0"
 	}
 	limitClause := ""
 	args := []any{}
@@ -30,7 +28,7 @@ func (s *Store) Chats(ctx context.Context, opts ChatListOptions) ([]ChatSummary,
 		limitClause = "limit ?"
 		args = append(args, opts.Limit)
 	}
-	rows, err := db.QueryContext(ctx, chatSummaryQuery("", unreadSelect, having)+limitClause, args...)
+	rows, err := db.QueryContext(ctx, chatSummaryQuery("", unreadSelect, unreadFilter)+limitClause, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -45,15 +43,15 @@ func (s *Store) Chats(ctx context.Context, opts ChatListOptions) ([]ChatSummary,
 	return out, nil
 }
 
-func (s *Store) Chat(ctx context.Context, chatID string) (ChatSummary, error) {
-	id, err := parseID(chatID, "chat")
-	if err != nil {
-		return ChatSummary{}, err
-	}
+func (s *Store) Chat(ctx context.Context, chatID ChatID) (ChatSummary, error) {
+	return s.readChatSummary(ctx, "where c.chat_id = ?", chatID)
+}
+
+func (s *Store) readChatSummary(ctx context.Context, where string, chatKey any) (ChatSummary, error) {
 	db := s.store.DB()
 	// The single-chat read backs the messages verb header, which never shows an
 	// unread count, so the unread select is null and Chat.Unread stays nil here.
-	rows, err := db.QueryContext(ctx, chatSummaryQuery("where c.source_rowid = ?", "null", ""), id)
+	rows, err := db.QueryContext(ctx, chatSummaryQuery(where, "null", "")+"limit 1", chatKey)
 	if err != nil {
 		return ChatSummary{}, err
 	}
@@ -63,7 +61,7 @@ func (s *Store) Chat(ctx context.Context, chatID string) (ChatSummary, error) {
 		return ChatSummary{}, err
 	}
 	if len(out) == 0 {
-		return ChatSummary{}, fmt.Errorf("%w: %s", ErrChatNotFound, chatID)
+		return ChatSummary{}, ErrChatNotFound
 	}
 	if err := populateConversationParticipantIdentities(ctx, db, out); err != nil {
 		return ChatSummary{}, err
@@ -75,12 +73,10 @@ func scanChatSummaries(rows *sql.Rows) ([]ChatSummary, error) {
 	out := []ChatSummary{}
 	for rows.Next() {
 		var c ChatSummary
-		var chatID int64
 		var unread sql.NullInt64
-		if err := rows.Scan(&chatID, &c.GUID, &c.Title, &c.Kind, &c.ChatIdentifier, &c.RoomName, &c.Service, &c.ParticipantCount, &c.MessageCount, &c.LatestMessageDate, &unread); err != nil {
+		if err := rows.Scan(&c.chatRowID, &c.ChatID, &c.GUID, &c.Title, &c.Kind, &c.ChatIdentifier, &c.RoomName, &c.Service, &c.ParticipantCount, &c.MessageCount, &c.LatestMessageDate, &unread); err != nil {
 			return nil, err
 		}
-		c.ChatID = strconv.FormatInt(chatID, 10)
 		if unread.Valid {
 			count := unread.Int64
 			c.Unread = &count
@@ -95,7 +91,7 @@ func populateConversationParticipantIdentities(ctx context.Context, db *sql.DB, 
 		conversationParticipantIdentities, err := readConversationParticipantIdentities(
 			ctx,
 			db,
-			chats[i].ChatID,
+			chats[i].chatRowID,
 		)
 		if err != nil {
 			return err
@@ -108,13 +104,9 @@ func populateConversationParticipantIdentities(ctx context.Context, db *sql.DB, 
 func readConversationParticipantIdentities(
 	ctx context.Context,
 	db *sql.DB,
-	chatID string,
+	chatRowID int64,
 ) ([]ConversationParticipantIdentity, error) {
-	id, err := parseID(chatID, "chat")
-	if err != nil {
-		return nil, err
-	}
-	rows, err := db.QueryContext(ctx, conversationParticipantIdentitiesSQL, id)
+	rows, err := db.QueryContext(ctx, conversationParticipantIdentitiesSQL, chatRowID)
 	if err != nil {
 		return nil, err
 	}

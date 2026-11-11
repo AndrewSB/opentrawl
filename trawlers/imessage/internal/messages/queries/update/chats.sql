@@ -1,6 +1,7 @@
 select
   rowid,
   guid,
+  cloudkit_record_id,
   coalesce(chat_identifier, ''),
   coalesce(service_name, ''),
   coalesce(display_name, ''),

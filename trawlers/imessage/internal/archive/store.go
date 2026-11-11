@@ -208,7 +208,12 @@ func updateWithStore(ctx context.Context, opened *store.Store, options UpdateOpt
 
 func (s *Store) ReplaceAll(ctx context.Context, data messages.ArchiveData, contactMappings []ContactMapping, ownerHandles []OwnerHandle, updatedAt time.Time) error {
 	return s.store.WithTx(ctx, func(tx *sql.Tx) error {
-		for _, table := range []string{"messages_fts", "messages", "chat_messages", "chat_participants", "chats", "handles", "contact_mappings", "owner_handles", "update_state"} {
+		// Replace the derived chat table in the snapshot transaction so a failed
+		// update preserves the previous archive and its links.
+		if _, err := tx.ExecContext(ctx, "drop table chats; "+chatSchema+"create index idx_chats_chat_id on chats(chat_id)"); err != nil {
+			return err
+		}
+		for _, table := range []string{"messages_fts", "messages", "chat_messages", "chat_participants", "handles", "contact_mappings", "owner_handles", "update_state"} {
 			if _, err := tx.ExecContext(ctx, "delete from "+table); err != nil {
 				return err
 			}
@@ -225,7 +230,7 @@ func (s *Store) ReplaceAll(ctx context.Context, data messages.ArchiveData, conta
 		}
 		for _, c := range data.Chats {
 			_, err := tx.ExecContext(ctx, insertChatsSQL,
-				c.SourceRowID, c.GUID, c.ChatIdentifier, c.ServiceName, c.DisplayName, c.RoomName, boolInt(c.IsArchived))
+				c.SourceRowID, c.GUID, c.CloudKitRecordID, chatID(c), c.ChatIdentifier, c.ServiceName, c.DisplayName, c.RoomName, boolInt(c.IsArchived))
 			if err != nil {
 				return err
 			}
@@ -283,7 +288,7 @@ func (s *Store) ReplaceAll(ctx context.Context, data messages.ArchiveData, conta
 				shortReferenceAssignmentCandidatesForRecordsPublishedByIMessageTransaction,
 				trawlkit.ShortReferenceAssignmentCandidate{
 					StableRecordReferenceUsedForShortReferenceAssignment: trawlkit.NewCanonicalArchiveRecordReference(
-						MessageRef(strconv.FormatInt(message.SourceRowID, 10)),
+						MessageRef(message.GUID),
 					),
 				},
 			)
@@ -293,7 +298,7 @@ func (s *Store) ReplaceAll(ctx context.Context, data messages.ArchiveData, conta
 				shortReferenceAssignmentCandidatesForRecordsPublishedByIMessageTransaction,
 				trawlkit.ShortReferenceAssignmentCandidate{
 					StableRecordReferenceUsedForShortReferenceAssignment: trawlkit.NewCanonicalArchiveRecordReference(
-						ChatRef(strconv.FormatInt(chat.SourceRowID, 10)),
+						ChatRef(chatID(chat)),
 					),
 				},
 			)

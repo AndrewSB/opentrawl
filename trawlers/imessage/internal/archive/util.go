@@ -3,10 +3,7 @@ package archive
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"os"
-	"strconv"
-	"strings"
 	"time"
 
 	ckstore "github.com/opentrawl/opentrawl/trawlkit/store"
@@ -18,14 +15,6 @@ func countTable(ctx context.Context, db *sql.DB, table string) (int64, error) {
 		return 0, err
 	}
 	return count, nil
-}
-
-func parseID(value, label string) (int64, error) {
-	id, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
-	if err != nil || id <= 0 {
-		return 0, fmt.Errorf("%s id must be a positive integer", label)
-	}
-	return id, nil
 }
 
 func ftsQuery(query string) string {

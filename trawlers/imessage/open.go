@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
+	"regexp"
 	"strings"
 
 	"github.com/opentrawl/opentrawl/trawlers/imessage/internal/archive"
+	"github.com/opentrawl/opentrawl/trawlers/imessage/internal/messages"
 	"github.com/opentrawl/opentrawl/trawlkit"
 	"github.com/opentrawl/opentrawl/trawlkit/render"
 )
@@ -18,8 +19,9 @@ const (
 )
 
 var (
-	errForeignRef = errors.New("ref is not from imessage")
-	errInvalidRef = errors.New("ref is not an imessage message ref")
+	errForeignRef      = errors.New("ref is not from imessage")
+	messageGUIDPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	chatIDPattern      = regexp.MustCompile(`^(?:[0-9a-fA-F]{64}|[^;[:space:]]+;[+-];.+)$`)
 )
 
 func (c *Crawler) loadOpenMessage(
@@ -49,7 +51,7 @@ func (c *Crawler) resolveOpenMessageID(
 	ctx context.Context,
 	req *trawlkit.TrawlerCommandExecutionRequest,
 	localShortReference *trawlkit.LocalTrawlerShortReference,
-) (string, error) {
+) (messages.MessageGUID, error) {
 	if !trawlkit.ValidShortRef(trawlkit.LocalTrawlerShortReferenceText(localShortReference)) {
 		return "", commandErr(1, "invalid_ref", render.LinkIsNotValid())
 	}
@@ -70,18 +72,33 @@ func (c *Crawler) resolveOpenMessageID(
 	return messageID, nil
 }
 
-func parseMessageRef(ref string) (string, error) {
-	ref = strings.TrimSpace(ref)
-	if !strings.HasPrefix(ref, messageRefPrefix) {
+func parseMessageRef(ref string) (messages.MessageGUID, error) {
+	messageGUID, found := strings.CutPrefix(ref, messageRefPrefix)
+	if !found {
 		return "", errForeignRef
 	}
-	messageID := strings.TrimPrefix(ref, messageRefPrefix)
-	if messageID == "" || strings.TrimSpace(messageID) != messageID {
-		return "", errInvalidRef
+	if !messageGUIDPattern.MatchString(messageGUID) {
+		return "", commandErr(1, "invalid_ref", render.LinkIsNotValid())
 	}
-	id, err := strconv.ParseInt(messageID, 10, 64)
-	if err != nil || id <= 0 {
-		return "", errInvalidRef
+	return messages.MessageGUID(strings.ToUpper(messageGUID)), nil
+}
+
+// ParseCanonicalRecordReferenceForOpen recognises the iMessage references
+// accepted by the root open command.
+func ParseCanonicalRecordReferenceForOpen(argument string) (*trawlkit.CanonicalArchiveRecordReference, error) {
+	argument = strings.TrimSpace(argument)
+	if strings.HasPrefix(argument, archive.MessageRefPrefix) {
+		messageGUID, err := parseMessageRef(argument)
+		if err != nil {
+			return nil, err
+		}
+		return trawlkit.NewCanonicalArchiveRecordReference(archive.MessageRef(messageGUID)), nil
 	}
-	return messageID, nil
+	if chatID, found := strings.CutPrefix(argument, archive.ChatRefPrefix); found {
+		if !chatIDPattern.MatchString(chatID) {
+			return nil, commandErr(1, "invalid_ref", render.LinkIsNotValid())
+		}
+		return trawlkit.NewCanonicalArchiveRecordReference(argument), nil
+	}
+	return nil, nil
 }

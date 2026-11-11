@@ -85,9 +85,10 @@ func (r runner) runInProcess(ctx context.Context, trawler Trawler, command targe
 		defer func() { _ = st.Close() }()
 	}
 	req := &TrawlerCommandExecutionRequest{
-		OpenedTrawlerArchiveStore: st,
-		TrawlerArchivePaths:       paths.TrawlerArchivePaths,
-		TrawlerCommandLog:         runLog,
+		OpenedTrawlerArchiveStore:      st,
+		TrawlerArchivePaths:            paths.TrawlerArchivePaths,
+		shortReferencesUseRecordPrefix: trawler.RegisteredTrawlerDeclaration().ShortReferencesUseRecordPrefix,
+		TrawlerCommandLog:              runLog,
 		ReportTrawlerCommandProgress: func(progress Progress) {
 			logProgress(runLog, progress)
 		},

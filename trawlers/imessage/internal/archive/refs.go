@@ -1,6 +1,6 @@
 package archive
 
-import "strings"
+import "github.com/opentrawl/opentrawl/trawlers/imessage/internal/messages"
 
 const (
 	MessageRefPrefix = "imessage:msg/"
@@ -8,18 +8,22 @@ const (
 	ChatRefPrefix = "imessage:chat/"
 )
 
-func MessageRef(messageID string) string {
-	return MessageRefPrefix + strings.TrimSpace(messageID)
+func MessageRef(messageGUID messages.MessageGUID) string {
+	return MessageRefPrefix + string(messageGUID)
 }
 
-func ChatRef(chatID string) string {
-	chatID = strings.TrimSpace(chatID)
+type ChatID string
+
+func chatID(chat messages.Chat) ChatID {
+	if chat.CloudKitRecordID != nil && *chat.CloudKitRecordID != "" {
+		return ChatID(*chat.CloudKitRecordID)
+	}
+	return ChatID(chat.GUID)
+}
+
+func ChatRef(chatID ChatID) string {
 	if chatID == "" {
 		return ""
 	}
-	return ChatRefPrefix + chatID
-}
-
-func ChatIDFromRef(value string) string {
-	return strings.TrimPrefix(strings.TrimSpace(value), ChatRefPrefix)
+	return ChatRefPrefix + string(chatID)
 }

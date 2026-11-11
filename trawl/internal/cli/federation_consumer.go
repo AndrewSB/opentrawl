@@ -20,7 +20,7 @@ type canonicalConsumerObserver interface {
 	observeOpen(
 		[]federation.OpenTrawler,
 		*trawlkit.RegisteredTrawlerIdentity,
-		*trawlkit.LocalTrawlerShortReference,
+		trawlkit.OpenRecordTarget,
 		*open.OpenResponse,
 	)
 }
@@ -77,13 +77,15 @@ func (r *Runtime) canonicalSearch(trawlers []federation.SearchTrawler, query tra
 func (r *Runtime) canonicalOpen(
 	trawlers []federation.OpenTrawler,
 	selectedTrawler *trawlkit.RegisteredTrawlerIdentity,
-	localShortReference *trawlkit.LocalTrawlerShortReference,
+	target trawlkit.OpenRecordTarget,
 	requestedTrawlLink *trawlkit.GloballyRoutableTrawlLink,
 ) *open.OpenResponse {
-	response := federation.Open(r.ctx, trawlers, selectedTrawler, localShortReference, nil)
-	response.RequestedTrawlLink = requestedTrawlLink
+	response := federation.Open(r.ctx, trawlers, selectedTrawler, target, nil)
+	if requestedTrawlLink != nil {
+		response.RequestedTrawlLink = requestedTrawlLink
+	}
 	if r.canonicalObserver != nil {
-		r.canonicalObserver.observeOpen(trawlers, selectedTrawler, localShortReference, response)
+		r.canonicalObserver.observeOpen(trawlers, selectedTrawler, target, response)
 	}
 	return response
 }

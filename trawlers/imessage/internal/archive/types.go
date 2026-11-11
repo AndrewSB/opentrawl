@@ -3,6 +3,7 @@ package archive
 import (
 	"time"
 
+	"github.com/opentrawl/opentrawl/trawlers/imessage/internal/messages"
 	person "github.com/opentrawl/opentrawl/trawlkit/proto/trawl/person"
 	"github.com/opentrawl/opentrawl/trawlkit/store"
 	"github.com/opentrawl/opentrawl/trawlkit/whomatch"
@@ -46,8 +47,9 @@ type Status struct {
 }
 
 type ChatSummary struct {
-	ChatID                            string                            `json:"chat_id"`
-	GUID                              string                            `json:"guid"`
+	chatRowID                         int64
+	ChatID                            ChatID                            `json:"chat_id"`
+	GUID                              messages.ChatGUID                 `json:"guid"`
 	Title                             string                            `json:"title"`
 	Kind                              string                            `json:"kind"`
 	ChatIdentifier                    string                            `json:"chat_identifier,omitempty"`
@@ -69,19 +71,19 @@ type ConversationParticipantIdentity struct {
 }
 
 type MessageRow struct {
-	MessageID      string `json:"message_id"`
-	Ref            string `json:"ref,omitempty"`
-	ShortRef       string `json:"short_ref,omitempty"`
-	GUID           string `json:"guid"`
-	ChatID         string `json:"chat_id"`
-	HandleID       string `json:"handle_id,omitempty"`
-	SenderHandle   string `json:"sender_handle,omitempty"`
-	SenderLabel    string `json:"sender_label,omitempty"`
-	Time           string `json:"time"`
-	Service        string `json:"service,omitempty"`
-	FromMe         bool   `json:"from_me"`
-	Text           string `json:"text,omitempty"`
-	HasAttachments bool   `json:"has_attachments,omitempty"`
+	MessageID      messages.MessageGUID `json:"message_id"`
+	Ref            string               `json:"ref,omitempty"`
+	ShortRef       string               `json:"short_ref,omitempty"`
+	GUID           messages.MessageGUID `json:"guid"`
+	ChatID         ChatID               `json:"chat_id"`
+	HandleID       string               `json:"handle_id,omitempty"`
+	SenderHandle   string               `json:"sender_handle,omitempty"`
+	SenderLabel    string               `json:"sender_label,omitempty"`
+	Time           string               `json:"time"`
+	Service        string               `json:"service,omitempty"`
+	FromMe         bool                 `json:"from_me"`
+	Text           string               `json:"text,omitempty"`
+	HasAttachments bool                 `json:"has_attachments,omitempty"`
 }
 
 type MessageContext struct {
@@ -108,10 +110,10 @@ type SearchPage struct {
 }
 
 type SearchResult struct {
-	MessageID                             string                            `json:"message_id"`
+	MessageID                             messages.MessageGUID              `json:"message_id"`
 	ShortRef                              string                            `json:"-"`
-	GUID                                  string                            `json:"guid"`
-	ChatID                                string                            `json:"chat_id,omitempty"`
+	GUID                                  messages.MessageGUID              `json:"guid"`
+	ChatID                                ChatID                            `json:"chat_id,omitempty"`
 	ChatTitle                             string                            `json:"chat_title,omitempty"`
 	ChatKind                              string                            `json:"chat_kind,omitempty"`
 	ChatParticipantCount                  int64                             `json:"chat_participant_count,omitempty"`

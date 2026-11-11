@@ -32,9 +32,9 @@ type OpenTrawler struct {
 	Manifest *federation.RegisteredTrawlerManifest
 	Run      func(
 		context.Context,
-		*trawlkit.LocalTrawlerShortReference,
+		trawlkit.OpenRecordTarget,
 		*trawlkit.RecordAnchorIdentifier,
-	) (*open.OpenRecord, *federation.TrawlerOperationFailure)
+	) (*open.OpenRecord, *trawlkit.LocalTrawlerShortReference, *federation.TrawlerOperationFailure)
 	SkipReason string
 }
 
